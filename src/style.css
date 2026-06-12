@@ -21,7 +21,7 @@
   --color-danger-hover: #dc2626;
   --color-danger-subtle: #fef2f2;
 
-  --font-sans: 'Nunito Sans Variable', sans-serif;
+  --font-sans: 'Nunito Sans Variable', ui-sans-serif, system-ui, sans-serif;
 
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
@@ -34,7 +34,7 @@
   }
 
   body {
-    font-family: var(--font-sans);
+    font-family: var(--font-sans), sans-serif;
     color: var(--color-text);
     background-color: var(--color-bg);
     line-height: 1.6;
