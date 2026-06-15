@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useEditorStore } from '../store/editorStore'
 import { render, type CanvasPalette } from './draw'
 import { createViewport, panBy, zoomAt } from './viewport'
@@ -10,7 +10,7 @@ const editor = useEditorStore()
 const container = useTemplateRef('container')
 const canvas = useTemplateRef('canvas')
 
-const viewport = reactive(createViewport())
+const viewport = createViewport()
 const spaceHeld = ref(false)
 
 let palette: CanvasPalette = {
@@ -21,23 +21,20 @@ let palette: CanvasPalette = {
   wall: '#1e293b',
 }
 let dpr = 1
-let dirty = true
-let rafId = 0
+let frameId: number | undefined
 let resizeObserver: ResizeObserver | undefined
 let panning = false
 let lastPointer: Vec2 | null = null
 
+/** Requests a single repaint on the next frame; repeated calls coalesce into one. */
 function markDirty() {
-  dirty = true
-}
-
-function frame() {
-  rafId = requestAnimationFrame(frame)
-  if (!dirty) return
-  dirty = false
-  const ctx = canvas.value?.getContext('2d')
-  if (!ctx || !editor.doc) return
-  render(ctx, viewport, editor.doc, palette, dpr)
+  if (frameId !== undefined) return
+  frameId = requestAnimationFrame(() => {
+    frameId = undefined
+    const ctx = canvas.value?.getContext('2d')
+    if (!ctx || !editor.doc) return
+    render(ctx, viewport, editor.doc, palette, dpr)
+  })
 }
 
 function readPalette(): CanvasPalette {
@@ -111,11 +108,11 @@ onMounted(() => {
   if (container.value) resizeObserver.observe(container.value)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
-  rafId = requestAnimationFrame(frame)
+  markDirty()
 })
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(rafId)
+  if (frameId !== undefined) cancelAnimationFrame(frameId)
   resizeObserver?.disconnect()
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
