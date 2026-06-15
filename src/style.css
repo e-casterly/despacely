@@ -16,6 +16,11 @@
   --color-text-muted: #64748b;
   --color-overlay: rgb(0 0 0 / 0.4);
 
+  /* editor grid: 10cm / 50cm / 1m tiers */
+  --color-grid-fine: #f1f5f9;
+  --color-grid-mid: #e2e8f0;
+  --color-grid-strong: #cbd5e1;
+
   /* feedback */
   --color-danger: #ef4444;
   --color-danger-hover: #dc2626;

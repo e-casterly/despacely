@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import ProjectList from "@/features/projects/ProjectList.vue";
+import DefaultLayout from '@/layouts/DefaultLayout.vue'
+import ProjectList from '@/features/projects/ProjectList.vue'
 </script>
 
 <template>
-  <main class="container py-4">
+  <DefaultLayout>
     <ProjectList />
-  </main>
+  </DefaultLayout>
 </template>

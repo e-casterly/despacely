@@ -1,11 +1,72 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
+import BaseButton from '@/components/ui/BaseButton.vue'
+import Canvas2D from '@/features/editor/render2d/Canvas2D.vue'
+import { useEditorStore } from '@/features/editor/store/editorStore'
+import { useProjectStore } from '@/features/projects/projectStore'
 
 const route = useRoute()
+const editor = useEditorStore()
+const projects = useProjectStore()
+
+const projectId = computed(() => route.params.id as string)
+const project = computed(() => projects.projects.find((p) => p.id === projectId.value))
+const projectMissing = computed(() => projects.projects.length > 0 && !project.value)
+
+const saveLabel = computed(
+  () => ({ saved: 'Saved', saving: 'Saving…', error: 'Save failed' })[editor.saveState],
+)
+
+function onPageHide() {
+  void editor.flush()
+}
+
+onMounted(async () => {
+  window.addEventListener('pagehide', onPageHide)
+  if (projects.projects.length === 0) await projects.load()
+  await editor.open(projectId.value)
+})
+
+// vue-router reuses this component when navigating editor -> editor
+watch(projectId, async (id, previous) => {
+  if (id && id !== previous) {
+    await editor.close()
+    await editor.open(id)
+  }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pagehide', onPageHide)
+  void editor.close()
+})
 </script>
 
 <template>
-  <div class="p-8">
-    <p class="text-text-muted">Editor — project {{ route.params.id }}</p>
+  <div class="flex flex-col h-svh">
+    <div class="flex flex-none items-center gap-4 border-b border-border bg-surface px-4 py-2">
+      <RouterLink to="/" class="text-sm text-text-muted hover:text-text">← Projects</RouterLink>
+      <h1 class="text-sm font-semibold">{{ project?.name ?? '…' }}</h1>
+      <span
+        class="ml-auto text-xs"
+        :class="editor.saveState === 'error' ? 'text-danger' : 'text-text-muted'"
+      >
+        {{ saveLabel }}
+      </span>
+    </div>
+
+    <div v-if="projectMissing" class="flex flex-1 flex-col items-center justify-center gap-3">
+      <p class="text-sm text-text-muted">Project not found.</p>
+      <RouterLink to="/"><BaseButton variant="secondary" size="sm">Back to projects</BaseButton></RouterLink>
+    </div>
+
+    <div v-else-if="editor.loadFailed" class="flex flex-1 flex-col items-center justify-center gap-3">
+      <p class="text-sm text-text-muted">Couldn't open the scene.</p>
+      <BaseButton variant="secondary" size="sm" @click="editor.open(projectId)">Retry</BaseButton>
+    </div>
+
+    <div v-else class="relative flex flex-1 overflow-hidden">
+      <Canvas2D v-if="editor.doc" />
+    </div>
   </div>
 </template>

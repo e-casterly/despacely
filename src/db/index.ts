@@ -1,13 +1,18 @@
 import Dexie, { type Table } from 'dexie'
 import type { Project } from '@/features/projects/types'
+import type { StoredDocument } from '@/features/editor/persistence/documentDb'
 
 class AppDB extends Dexie {
   projects!: Table<Project>
+  documents!: Table<StoredDocument>
 
   constructor() {
     super('despacely')
     this.version(1).stores({
       projects: 'id, name, updatedAt',
+    })
+    this.version(2).stores({
+      documents: 'projectId',
     })
   }
 }

@@ -14,10 +14,10 @@ export const projectDb = {
     return db.projects.put(project)
   },
 
-  // transactional so the copy is all-or-nothing; when the editor's documents
-  // table lands, add it to this transaction and copy the scene here as well
+  // transactional so the copy is all-or-nothing: a duplicated project can
+  // never exist without its scene document, and vice versa
   duplicate(id: string, name: string): Promise<Project | undefined> {
-    return db.transaction('rw', db.projects, async () => {
+    return db.transaction('rw', db.projects, db.documents, async () => {
       const source = await db.projects.get(id)
       if (!source) return undefined
 
@@ -29,11 +29,19 @@ export const projectDb = {
         updatedAt: Date.now(),
       }
       await db.projects.put(copy)
+
+      const document = await db.documents.get(id)
+      if (document) {
+        await db.documents.put({ projectId: copy.id, doc: document.doc, updatedAt: Date.now() })
+      }
       return copy
     })
   },
 
   remove(id: string): Promise<void> {
-    return db.projects.delete(id)
+    return db.transaction('rw', db.projects, db.documents, async () => {
+      await db.projects.delete(id)
+      await db.documents.delete(id)
+    })
   },
 }
