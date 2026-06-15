@@ -4,6 +4,9 @@ import { useEditorStore } from '../store/editorStore'
 import { render, type CanvasPalette } from './draw'
 import { createViewport, panBy, zoomAt } from './viewport'
 import type { Vec2 } from '../domain/types'
+import type { ToolId } from '../tools/types'
+
+const { activeTool } = defineProps<{ activeTool: ToolId }>()
 
 const editor = useEditorStore()
 
@@ -124,7 +127,15 @@ onBeforeUnmount(() => {
     <canvas
       ref="canvas"
       class="block h-full w-full touch-none"
-      :class="panning ? 'cursor-grabbing' : spaceHeld ? 'cursor-grab' : ''"
+      :class="
+        panning
+          ? 'cursor-grabbing'
+          : spaceHeld
+            ? 'cursor-grab'
+            : activeTool === 'wall'
+              ? 'cursor-crosshair'
+              : ''
+      "
       @wheel.prevent="onWheel"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"

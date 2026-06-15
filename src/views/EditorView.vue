@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import Canvas2D from '@/features/editor/render2d/Canvas2D.vue'
+import EditorSidebar from '@/features/editor/ui/EditorSidebar.vue'
 import { useEditorStore } from '@/features/editor/store/editorStore'
+import type { ToolId } from '@/features/editor/tools/types'
 import { useProjectStore } from '@/features/projects/projectStore'
 
 const route = useRoute()
 const editor = useEditorStore()
 const projects = useProjectStore()
+
+const activeTool = ref<ToolId>('select')
 
 const projectId = computed(() => route.params.id as string)
 const project = computed(() => projects.projects.find((p) => p.id === projectId.value))
@@ -22,8 +26,13 @@ function onPageHide() {
   void editor.flush()
 }
 
+function onKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Escape') activeTool.value = 'select'
+}
+
 onMounted(async () => {
   window.addEventListener('pagehide', onPageHide)
+  window.addEventListener('keydown', onKeyDown)
   if (projects.projects.length === 0) await projects.load()
   await editor.open(projectId.value)
 })
@@ -38,6 +47,7 @@ watch(projectId, async (id, previous) => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('pagehide', onPageHide)
+  window.removeEventListener('keydown', onKeyDown)
   void editor.close()
 })
 </script>
@@ -65,8 +75,11 @@ onBeforeUnmount(() => {
       <BaseButton variant="secondary" size="sm" @click="editor.open(projectId)">Retry</BaseButton>
     </div>
 
-    <div v-else class="relative flex flex-1 overflow-hidden">
-      <Canvas2D v-if="editor.doc" />
+    <div v-else class="flex flex-1 overflow-hidden">
+      <EditorSidebar :active-tool="activeTool" @select-tool="activeTool = $event" />
+      <div class="relative flex-1">
+        <Canvas2D v-if="editor.doc" :active-tool="activeTool" />
+      </div>
     </div>
   </div>
 </template>
