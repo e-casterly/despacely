@@ -1,73 +1,61 @@
-# .
+# Despacely
 
-This template should help get you started developing with Vue 3 in Vite.
+A local-first floor planning app — create projects, draw walls and arrange furniture in 2D, and preview the result in 3D. Everything is stored in the browser (IndexedDB), with no backend.
 
-## Recommended IDE Setup
+> **🚧 Work in progress.** Despacely is an early-stage personal project, built as an example of clean architecture and a well-tested codebase. The project CRUD is in place; the editor is being built out milestone by milestone. APIs and data shapes may still change.
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+## Status
 
-## Recommended Browser Setup
+- ✅ Project management — create, rename, duplicate, delete (persisted in IndexedDB)
+- ✅ Editor foundation — scene document model, autosave, undo/redo groundwork
+- ✅ 2D canvas — grid, pan & zoom
+- 🚧 Drawing tools — walls and furniture placement
+- 🚧 3D preview (Three.js)
 
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
+## Tech stack
 
-## Type Support for `.vue` Imports in TS
+Vue 3 (`<script setup>`) · TypeScript · Pinia · Vue Router · Dexie (IndexedDB) · Tailwind CSS v4 · Vite · Vitest · Playwright.
 
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
+## Architecture
 
-## Customize configuration
+The codebase is feature-sliced (`src/features/*`) with a strict layering inside the editor: a dependency-free **domain** layer (the scene model, geometry and operations — plain TypeScript, no Vue or Dexie) sits at the core, with persistence, state (Pinia) and rendering built around it. The 2D and 3D views are projections of one shared scene document. Reusable UI primitives live in `src/components/ui` (`Base*`), app-level singletons in `src/components/app` (`App*`).
 
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+## Project setup
 
 ```sh
 pnpm install
 ```
 
-### Compile and Hot-Reload for Development
+### Develop (hot-reload)
 
 ```sh
 pnpm dev
 ```
 
-### Type-Check, Compile and Minify for Production
+### Type-check, compile and minify for production
 
 ```sh
 pnpm build
 ```
 
-### Run Unit Tests with [Vitest](https://vitest.dev/)
+### Unit tests ([Vitest](https://vitest.dev/))
 
 ```sh
 pnpm test:unit
 ```
 
-### Run End-to-End Tests with [Playwright](https://playwright.dev)
+### End-to-end tests ([Playwright](https://playwright.dev))
 
 ```sh
 # Install browsers for the first run
 npx playwright install
 
-# When testing on CI, must build the project first
-pnpm build
-
-# Runs the end-to-end tests
 pnpm test:e2e
-# Runs the tests only on Chromium
-pnpm test:e2e --project=chromium
-# Runs the tests of a specific file
-pnpm test:e2e tests/example.spec.ts
-# Runs the tests in debug mode
-pnpm test:e2e --debug
 ```
 
-### Lint with [ESLint](https://eslint.org/)
+### Lint ([ESLint](https://eslint.org/) + [oxlint](https://oxc.rs/))
 
 ```sh
 pnpm lint
 ```
+
