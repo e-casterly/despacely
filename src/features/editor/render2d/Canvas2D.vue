@@ -2,9 +2,10 @@
 import { onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useEditorStore } from '../store/editorStore'
 import { render, type CanvasPalette } from './draw'
-import { createViewport, panBy, zoomAt } from './viewport'
+import { createViewport, panBy, screenToWorld, zoomAt } from './viewport'
 import type { Vec2 } from '../domain/types'
-import type { ToolId } from '../tools/types'
+import type { PointerInput, Tool, ToolContext, ToolId } from '../tools/types'
+import { createWallTool } from '../tools/wallTool'
 
 const { activeTool } = defineProps<{ activeTool: ToolId }>()
 
@@ -16,12 +17,30 @@ const canvas = useTemplateRef('canvas')
 const viewport = createViewport()
 const spaceHeld = ref(false)
 
+// tool instances keyed by id; 'select' has no tool yet
+const tools: Partial<Record<ToolId, Tool>> = {
+  wall: createWallTool(),
+}
+function currentTool(): Tool | undefined {
+  return tools[activeTool]
+}
+
+/** node-reuse snap radius: ~10 screen px expressed in world cm */
+const SNAP_PX = 10
+function toolContext(): ToolContext {
+  return { doc: editor.doc!, apply: editor.apply, snapDist: SNAP_PX / viewport.zoom }
+}
+function pointerInput(event: PointerEvent): PointerInput {
+  return { world: screenToWorld(viewport, pointerPosition(event)), shift: event.shiftKey }
+}
+
 let palette: CanvasPalette = {
   background: '#ffffff',
   gridFine: '#f1f5f9',
   gridMid: '#e2e8f0',
   gridStrong: '#cbd5e1',
   wall: '#1e293b',
+  accent: '#6366f1',
 }
 let dpr = 1
 let frameId: number | undefined
@@ -36,7 +55,7 @@ function markDirty() {
     frameId = undefined
     const ctx = canvas.value?.getContext('2d')
     if (!ctx || !editor.doc) return
-    render(ctx, viewport, editor.doc, palette, dpr)
+    render(ctx, viewport, editor.doc, palette, dpr, currentTool()?.preview)
   })
 }
 
@@ -49,6 +68,7 @@ function readPalette(): CanvasPalette {
     gridMid: token('--color-grid-mid', palette.gridMid),
     gridStrong: token('--color-grid-strong', palette.gridStrong),
     wall: token('--color-text', palette.wall),
+    accent: token('--color-primary', palette.accent),
   }
 }
 
@@ -74,24 +94,46 @@ function onWheel(event: WheelEvent) {
 }
 
 function onPointerDown(event: PointerEvent) {
-  const panButton = event.button === 1 || (event.button === 0 && spaceHeld.value)
-  if (!panButton) return
-  panning = true
-  lastPointer = { x: event.clientX, y: event.clientY }
-  canvas.value?.setPointerCapture(event.pointerId)
-  event.preventDefault()
+  if (event.button === 1 || (event.button === 0 && spaceHeld.value)) {
+    panning = true
+    lastPointer = { x: event.clientX, y: event.clientY }
+    canvas.value?.setPointerCapture(event.pointerId)
+    event.preventDefault()
+    return
+  }
+  if (event.button !== 0) return
+  const tool = currentTool()
+  if (tool?.onPointerDown) {
+    tool.onPointerDown(pointerInput(event), toolContext())
+    markDirty()
+  }
 }
 
 function onPointerMove(event: PointerEvent) {
-  if (!panning || !lastPointer) return
-  panBy(viewport, { x: event.clientX - lastPointer.x, y: event.clientY - lastPointer.y })
-  lastPointer = { x: event.clientX, y: event.clientY }
-  markDirty()
+  if (panning && lastPointer) {
+    panBy(viewport, { x: event.clientX - lastPointer.x, y: event.clientY - lastPointer.y })
+    lastPointer = { x: event.clientX, y: event.clientY }
+    markDirty()
+    return
+  }
+  const tool = currentTool()
+  if (tool?.onPointerMove) {
+    tool.onPointerMove(pointerInput(event), toolContext())
+    if (tool.preview) markDirty()
+  }
 }
 
-function onPointerUp() {
-  panning = false
-  lastPointer = null
+function onPointerUp(event: PointerEvent) {
+  if (panning) {
+    panning = false
+    lastPointer = null
+    return
+  }
+  const tool = currentTool()
+  if (tool?.onPointerUp) {
+    tool.onPointerUp(pointerInput(event), toolContext())
+    markDirty()
+  }
 }
 
 function onKeyDown(event: KeyboardEvent) {
@@ -103,6 +145,15 @@ function onKeyUp(event: KeyboardEvent) {
 }
 
 watch(() => editor.doc, markDirty, { deep: true })
+
+// switching tools (incl. Esc -> select) ends any in-progress interaction
+watch(
+  () => activeTool,
+  (_next, prev) => {
+    if (prev) tools[prev]?.cancel?.()
+    markDirty()
+  },
+)
 
 onMounted(() => {
   palette = readPalette()

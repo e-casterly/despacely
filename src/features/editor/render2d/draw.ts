@@ -1,5 +1,6 @@
 import { wallSegment } from '../domain/operations'
 import type { SceneDocument } from '../domain/types'
+import type { ToolOverlay } from '../tools/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
 
 export interface CanvasPalette {
@@ -8,6 +9,7 @@ export interface CanvasPalette {
   gridMid: string
   gridStrong: string
   wall: string
+  accent: string
 }
 
 /** Metric grid tiers (cm): 10cm fine, 50cm (4 squares per metre), 1m strong. */
@@ -27,6 +29,7 @@ export function render(
   doc: SceneDocument,
   palette: CanvasPalette,
   dpr: number,
+  overlay?: ToolOverlay | null,
 ): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = palette.background
@@ -37,7 +40,25 @@ export function render(
   withWorldTransform(ctx, vp, dpr, () => {
     drawWalls(ctx, doc, palette)
     drawItems(ctx, vp, doc)
+    if (overlay?.ghostWall) drawGhostWall(ctx, vp, overlay.ghostWall, palette)
   })
+}
+
+function drawGhostWall(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  seg: { a: { x: number; y: number }; b: { x: number; y: number } },
+  palette: CanvasPalette,
+): void {
+  ctx.save()
+  ctx.strokeStyle = palette.accent
+  ctx.lineWidth = 2 / vp.zoom
+  ctx.setLineDash([8 / vp.zoom, 6 / vp.zoom])
+  ctx.beginPath()
+  ctx.moveTo(seg.a.x, seg.a.y)
+  ctx.lineTo(seg.b.x, seg.b.y)
+  ctx.stroke()
+  ctx.restore()
 }
 
 /**
