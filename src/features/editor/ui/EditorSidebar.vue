@@ -2,13 +2,21 @@
 import BaseButton from '@/components/ui/BaseButton.vue'
 import type { ToolId } from '../tools/types'
 
-const { activeTool } = defineProps<{ activeTool: ToolId }>()
+const { activeTool } = defineProps<{
+  activeTool: ToolId
+  canUndo: boolean
+  canRedo: boolean
+}>()
 
-const emit = defineEmits<{ 'select-tool': [tool: ToolId] }>()
+const emit = defineEmits<{
+  'select-tool': [tool: ToolId]
+  undo: []
+  redo: []
+}>()
 
-// clicking the active tool returns to select
-function toggle(tool: Exclude<ToolId, 'select'>) {
-  emit('select-tool', activeTool === tool ? 'select' : tool)
+// clicking the active tool returns to the neutral 'select' mode
+function toggleWall() {
+  emit('select-tool', activeTool === 'wall' ? 'select' : 'wall')
 }
 </script>
 
@@ -19,9 +27,28 @@ function toggle(tool: Exclude<ToolId, 'select'>) {
       icon="wall"
       class="w-full justify-start"
       :aria-pressed="activeTool === 'wall'"
-      @click="toggle('wall')"
+      @click="toggleWall"
     >
       Draw walls
     </BaseButton>
+
+    <div class="mt-auto flex gap-1 border-t border-border pt-2">
+      <BaseButton
+        variant="ghost"
+        size="sm"
+        icon="undo"
+        aria-label="Undo"
+        :disabled="!canUndo"
+        @click="$emit('undo')"
+      />
+      <BaseButton
+        variant="ghost"
+        size="sm"
+        icon="redo"
+        aria-label="Redo"
+        :disabled="!canRedo"
+        @click="$emit('redo')"
+      />
+    </div>
   </aside>
 </template>

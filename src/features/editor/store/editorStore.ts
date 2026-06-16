@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, toRaw } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { useToastStore } from '@/stores/toasts'
 import type { Command } from '../domain/commands'
 import { createEmptyDocument } from '../domain/operations'
@@ -15,7 +15,10 @@ export const useEditorStore = defineStore('editor', () => {
   const toasts = useToastStore()
 
   const projectId = ref<string | null>(null)
-  const doc = ref<SceneDocument | null>(null)
+  // shallowRef: the document is plain (no deep Vue proxy), so it stays
+  // structured-cloneable for IndexedDB. Mutations are signalled via `revision`.
+  const doc = shallowRef<SceneDocument | null>(null)
+  const revision = ref(0)
   const loadFailed = ref(false)
   const saveState = ref<SaveState>('saved')
 
@@ -24,6 +27,11 @@ export const useEditorStore = defineStore('editor', () => {
   const canRedo = ref(false)
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined
+
+  /** Bumped on any document change to drive the canvas redraw. */
+  function touch() {
+    revision.value++
+  }
 
   function syncHistory() {
     canUndo.value = history.canUndo
@@ -48,8 +56,9 @@ export const useEditorStore = defineStore('editor', () => {
         doc.value = existing
       } else {
         doc.value = createEmptyDocument()
-        await documentDb.save(id, toRaw(doc.value))
+        await documentDb.save(id, doc.value)
       }
+      touch()
     } catch (error) {
       loadFailed.value = true
       reportError('open the scene', error)
@@ -61,6 +70,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!doc.value) return
     history.apply(doc.value, command)
     syncHistory()
+    touch()
     scheduleSave()
   }
 
@@ -68,6 +78,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!doc.value || !history.canUndo) return
     history.undo(doc.value)
     syncHistory()
+    touch()
     scheduleSave()
   }
 
@@ -75,6 +86,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!doc.value || !history.canRedo) return
     history.redo(doc.value)
     syncHistory()
+    touch()
     scheduleSave()
   }
 
@@ -92,7 +104,7 @@ export const useEditorStore = defineStore('editor', () => {
   async function persist() {
     if (!doc.value || projectId.value === null) return
     try {
-      await documentDb.save(projectId.value, toRaw(doc.value))
+      await documentDb.save(projectId.value, doc.value)
       saveState.value = 'saved'
     } catch (error) {
       saveState.value = 'error'
@@ -121,6 +133,7 @@ export const useEditorStore = defineStore('editor', () => {
   return {
     projectId,
     doc,
+    revision,
     loadFailed,
     saveState,
     canUndo,

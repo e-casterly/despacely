@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { isReactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToastStore } from '@/stores/toasts'
 import { AddItemCommand } from '../../domain/commands'
@@ -179,6 +180,17 @@ describe('history', () => {
 
     await store.open('p2')
     expect(store.canUndo).toBe(false)
+  })
+
+  // regression: a deeply reactive doc leaked Vue proxies into IndexedDB and
+  // threw DataCloneError on undo (filter/reassign repopulated with proxies)
+  it('keeps the document plain and cloneable after undo', async () => {
+    const store = await openedStore()
+    store.apply(new AddItemCommand(makeItem()))
+    store.undo()
+
+    expect(isReactive(store.doc)).toBe(false)
+    expect(() => structuredClone(store.doc)).not.toThrow()
   })
 })
 

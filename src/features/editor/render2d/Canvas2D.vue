@@ -144,7 +144,8 @@ function onKeyUp(event: KeyboardEvent) {
   if (event.code === 'Space') spaceHeld.value = false
 }
 
-watch(() => editor.doc, markDirty, { deep: true })
+// the document is non-reactive; the store bumps `revision` on every change
+watch(() => editor.revision, markDirty)
 
 // switching tools (incl. Esc -> select) ends any in-progress interaction
 watch(

@@ -1,7 +1,7 @@
 import type { Command } from '../domain/commands'
 import type { SceneDocument, Vec2 } from '../domain/types'
 
-/** The editor's active interaction mode. Grows as tools are added. */
+/** The editor's active interaction mode. 'select' is the neutral mode. */
 export type ToolId = 'select' | 'wall'
 
 /** A pointer event delivered to a tool in world coordinates (cm). */

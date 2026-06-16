@@ -87,7 +87,14 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="flex flex-1 overflow-hidden">
-      <EditorSidebar :active-tool="activeTool" @select-tool="activeTool = $event" />
+      <EditorSidebar
+        :active-tool="activeTool"
+        :can-undo="editor.canUndo"
+        :can-redo="editor.canRedo"
+        @select-tool="activeTool = $event"
+        @undo="editor.undo"
+        @redo="editor.redo"
+      />
       <div class="relative flex-1">
         <Canvas2D v-if="editor.doc" :active-tool="activeTool" />
       </div>
