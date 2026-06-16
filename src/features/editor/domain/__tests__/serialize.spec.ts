@@ -3,7 +3,7 @@ import { createEmptyDocument } from '../operations'
 import { parseDocument } from '../serialize'
 
 describe('parseDocument', () => {
-  it('accepts a valid v1 document', () => {
+  it('accepts a valid document', () => {
     const doc = createEmptyDocument()
     expect(parseDocument(doc)).toBe(doc)
   })
@@ -13,11 +13,12 @@ describe('parseDocument', () => {
     expect(() => parseDocument('walls')).toThrow()
   })
 
-  it('rejects unknown versions', () => {
-    expect(() => parseDocument({ version: 2, walls: [], items: [] })).toThrow(/version/)
+  it('rejects a missing or malformed nodes map', () => {
+    expect(() => parseDocument({ walls: [], items: [] })).toThrow(/malformed/)
+    expect(() => parseDocument({ nodes: [], walls: [], items: [] })).toThrow(/malformed/)
   })
 
-  it('rejects malformed shapes', () => {
-    expect(() => parseDocument({ version: 1, walls: {}, items: [] })).toThrow(/malformed/)
+  it('rejects malformed wall/item collections', () => {
+    expect(() => parseDocument({ nodes: {}, walls: {}, items: [] })).toThrow(/malformed/)
   })
 })

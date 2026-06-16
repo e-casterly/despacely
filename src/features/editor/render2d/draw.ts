@@ -1,3 +1,4 @@
+import { wallSegment } from '../domain/operations'
 import type { SceneDocument } from '../domain/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
 
@@ -94,10 +95,11 @@ function drawWalls(ctx: CanvasRenderingContext2D, doc: SceneDocument, palette: C
   ctx.strokeStyle = palette.wall
   ctx.lineCap = 'butt'
   for (const wall of doc.walls) {
+    const { a, b } = wallSegment(doc, wall)
     ctx.lineWidth = wall.thickness
     ctx.beginPath()
-    ctx.moveTo(wall.a.x, wall.a.y)
-    ctx.lineTo(wall.b.x, wall.b.y)
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
     ctx.stroke()
   }
 }

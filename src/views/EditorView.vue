@@ -27,7 +27,18 @@ function onPageHide() {
 }
 
 function onKeyDown(event: KeyboardEvent) {
-  if (event.key === 'Escape') activeTool.value = 'select'
+  const target = event.target as HTMLElement
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+
+  if (event.key === 'Escape') {
+    activeTool.value = 'select'
+    return
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+    event.preventDefault()
+    if (event.shiftKey) editor.redo()
+    else editor.undo()
+  }
 }
 
 onMounted(async () => {

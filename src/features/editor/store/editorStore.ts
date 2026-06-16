@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, toRaw } from 'vue'
 import { useToastStore } from '@/stores/toasts'
+import type { Command } from '../domain/commands'
 import { createEmptyDocument } from '../domain/operations'
 import type { SceneDocument } from '../domain/types'
 import { documentDb } from '../persistence/documentDb'
+import { History } from './history'
 
 export type SaveState = 'saved' | 'saving' | 'error'
 
@@ -17,7 +19,16 @@ export const useEditorStore = defineStore('editor', () => {
   const loadFailed = ref(false)
   const saveState = ref<SaveState>('saved')
 
+  const history = new History()
+  const canUndo = ref(false)
+  const canRedo = ref(false)
+
   let saveTimer: ReturnType<typeof setTimeout> | undefined
+
+  function syncHistory() {
+    canUndo.value = history.canUndo
+    canRedo.value = history.canRedo
+  }
 
   function reportError(action: string, error: unknown) {
     console.error(`Failed to ${action}`, error)
@@ -29,6 +40,8 @@ export const useEditorStore = defineStore('editor', () => {
     doc.value = null
     loadFailed.value = false
     saveState.value = 'saved'
+    history.clear()
+    syncHistory()
     try {
       const existing = await documentDb.get(id)
       if (existing) {
@@ -41,6 +54,28 @@ export const useEditorStore = defineStore('editor', () => {
       loadFailed.value = true
       reportError('open the scene', error)
     }
+  }
+
+  /** The single channel for document edits: applies a command, then autosaves. */
+  function apply(command: Command) {
+    if (!doc.value) return
+    history.apply(doc.value, command)
+    syncHistory()
+    scheduleSave()
+  }
+
+  function undo() {
+    if (!doc.value || !history.canUndo) return
+    history.undo(doc.value)
+    syncHistory()
+    scheduleSave()
+  }
+
+  function redo() {
+    if (!doc.value || !history.canRedo) return
+    history.redo(doc.value)
+    syncHistory()
+    scheduleSave()
   }
 
   /** Call after every document mutation; saves are debounced. */
@@ -79,7 +114,23 @@ export const useEditorStore = defineStore('editor', () => {
     doc.value = null
     loadFailed.value = false
     saveState.value = 'saved'
+    history.clear()
+    syncHistory()
   }
 
-  return { projectId, doc, loadFailed, saveState, open, scheduleSave, flush, close }
+  return {
+    projectId,
+    doc,
+    loadFailed,
+    saveState,
+    canUndo,
+    canRedo,
+    open,
+    apply,
+    undo,
+    redo,
+    scheduleSave,
+    flush,
+    close,
+  }
 })

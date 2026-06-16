@@ -1,9 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToastStore } from '@/stores/toasts'
+import { AddItemCommand } from '../../domain/commands'
 import { createEmptyDocument } from '../../domain/operations'
+import type { Item } from '../../domain/types'
 import { documentDb } from '../../persistence/documentDb'
 import { AUTOSAVE_DELAY_MS, useEditorStore } from '../editorStore'
+
+function makeItem(id = 'i1'): Item {
+  return {
+    id,
+    kind: 'box',
+    pos: { x: 0, y: 0 },
+    size: { x: 60, y: 60 },
+    height: 75,
+    rotation: 0,
+    color: '#94a3b8',
+  }
+}
 
 vi.mock('../../persistence/documentDb', () => ({
   documentDb: {
@@ -48,7 +62,7 @@ describe('open', () => {
     await store.open('p1')
 
     expect(store.doc).toEqual(createEmptyDocument())
-    expect(db.save).toHaveBeenCalledWith('p1', expect.objectContaining({ version: 1 }))
+    expect(db.save).toHaveBeenCalledWith('p1', expect.objectContaining({ nodes: {}, walls: [] }))
   })
 
   it('sets loadFailed and shows a toast on failure', async () => {
@@ -121,6 +135,50 @@ describe('autosave', () => {
     await store.flush()
 
     expect(db.save).not.toHaveBeenCalled()
+  })
+})
+
+describe('history', () => {
+  async function openedStore() {
+    db.get.mockResolvedValue(createEmptyDocument())
+    db.save.mockResolvedValue('p1')
+    const store = useEditorStore()
+    await store.open('p1')
+    return store
+  }
+
+  it('applies a command, mutating the doc and enabling undo', async () => {
+    const store = await openedStore()
+
+    store.apply(new AddItemCommand(makeItem()))
+
+    expect(store.doc?.items).toHaveLength(1)
+    expect(store.canUndo).toBe(true)
+    expect(store.canRedo).toBe(false)
+    expect(store.saveState).toBe('saving')
+  })
+
+  it('undoes and redoes through the store', async () => {
+    const store = await openedStore()
+    store.apply(new AddItemCommand(makeItem()))
+
+    store.undo()
+    expect(store.doc?.items).toHaveLength(0)
+    expect(store.canUndo).toBe(false)
+    expect(store.canRedo).toBe(true)
+
+    store.redo()
+    expect(store.doc?.items).toHaveLength(1)
+    expect(store.canRedo).toBe(false)
+  })
+
+  it('resets history when opening another project', async () => {
+    const store = await openedStore()
+    store.apply(new AddItemCommand(makeItem()))
+    expect(store.canUndo).toBe(true)
+
+    await store.open('p2')
+    expect(store.canUndo).toBe(false)
   })
 })
 

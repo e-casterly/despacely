@@ -11,7 +11,9 @@ beforeEach(async () => {
 describe('documentDb', () => {
   it('round-trips a document', async () => {
     const doc = createEmptyDocument()
-    doc.walls.push({ id: 'w1', a: { x: 0, y: 0 }, b: { x: 100, y: 0 }, thickness: 10, height: 270 })
+    doc.nodes.n1 = { id: 'n1', pos: { x: 0, y: 0 } }
+    doc.nodes.n2 = { id: 'n2', pos: { x: 100, y: 0 } }
+    doc.walls.push({ id: 'w1', a: 'n1', b: 'n2', thickness: 10, height: 270 })
 
     await documentDb.save('p1', doc)
     const loaded = await documentDb.get('p1')
@@ -50,9 +52,9 @@ describe('documentDb', () => {
   it('rejects a corrupted document on read', async () => {
     await db.documents.put({
       projectId: 'p1',
-      doc: { version: 99 } as never,
+      doc: { walls: [] } as never,
       updatedAt: Date.now(),
     })
-    await expect(documentDb.get('p1')).rejects.toThrow(/version/)
+    await expect(documentDb.get('p1')).rejects.toThrow(/malformed/)
   })
 })

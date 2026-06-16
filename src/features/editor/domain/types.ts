@@ -10,12 +10,19 @@ export interface Vec2 {
   y: number
 }
 
+export type NodeId = string
+
+/** A shared point in the wall graph; walls reference nodes by id. */
+export interface Node {
+  id: NodeId
+  pos: Vec2
+}
+
 export interface Wall {
   id: string
-  /** centerline start */
-  a: Vec2
-  /** centerline end */
-  b: Vec2
+  /** centerline endpoints, referenced by node id so corners stay connected */
+  a: NodeId
+  b: NodeId
   thickness: number
   height: number
 }
@@ -33,7 +40,8 @@ export interface Item {
 }
 
 export interface SceneDocument {
-  version: 1
+  /** wall graph vertices, keyed by id for O(1) lookup */
+  nodes: Record<NodeId, Node>
   walls: Wall[]
   items: Item[]
 }
