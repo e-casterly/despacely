@@ -45,6 +45,7 @@ export function render(
 
   withWorldTransform(ctx, vp, dpr, () => {
     drawWalls(ctx, doc, palette, view.selectedWallId ?? null)
+    drawWallNodes(ctx, vp, doc, palette, view.selectedWallId ?? null)
     drawItems(ctx, vp, doc)
     if (view.overlay?.ghostWall) drawGhostWall(ctx, vp, view.overlay.ghostWall, palette)
   })
@@ -132,6 +133,41 @@ function drawWalls(
     ctx.beginPath()
     ctx.moveTo(a.x, a.y)
     ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+  }
+}
+
+/** Vertex radius in screen pixels, kept zoom-independent. */
+const NODE_RADIUS_PX = 8
+
+/** Draws a dot at every node referenced by a wall, on top of the strokes. */
+function drawWallNodes(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  doc: SceneDocument,
+  palette: CanvasPalette,
+  selectedWallId: string | null,
+): void {
+  const radius = NODE_RADIUS_PX / vp.zoom
+  const selected = new Set<string>()
+  const used = new Set<string>()
+  for (const wall of doc.walls) {
+    used.add(wall.a)
+    used.add(wall.b)
+    if (wall.id === selectedWallId) {
+      selected.add(wall.a)
+      selected.add(wall.b)
+    }
+  }
+  ctx.strokeStyle = palette.background
+  ctx.lineWidth = 1 / vp.zoom
+  for (const id of used) {
+    const node = doc.nodes[id]
+    if (!node) continue
+    ctx.fillStyle = selected.has(id) ? palette.accent : palette.wall
+    ctx.beginPath()
+    ctx.arc(node.pos.x, node.pos.y, radius, 0, Math.PI * 2)
+    ctx.fill()
     ctx.stroke()
   }
 }
