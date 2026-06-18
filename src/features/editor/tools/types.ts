@@ -10,11 +10,15 @@ export interface PointerInput {
   shift: boolean
 }
 
+/** What is currently selected in the editor (extends to nodes/items later). */
+export type Selection = { kind: 'wall'; id: string }
+
 /** Everything a tool needs to read the scene and commit edits. */
 export interface ToolContext {
   doc: SceneDocument
   apply: (command: Command) => void
-  /** node-reuse radius in world cm, derived from zoom */
+  select: (selection: Selection | null) => void
+  /** pointer pick/snap tolerance in world cm, derived from zoom */
   snapDist: number
 }
 

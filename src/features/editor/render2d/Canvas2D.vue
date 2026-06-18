@@ -6,6 +6,7 @@ import { createViewport, panBy, screenToWorld, zoomAt } from './viewport'
 import type { Vec2 } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolId } from '../tools/types'
 import { createWallTool } from '../tools/wallTool'
+import { createSelectTool } from '../tools/selectTool'
 
 const { activeTool } = defineProps<{ activeTool: ToolId }>()
 
@@ -17,18 +18,23 @@ const canvas = useTemplateRef('canvas')
 const viewport = createViewport()
 const spaceHeld = ref(false)
 
-// tool instances keyed by id; 'select' has no tool yet
 const tools: Partial<Record<ToolId, Tool>> = {
+  select: createSelectTool(),
   wall: createWallTool(),
 }
 function currentTool(): Tool | undefined {
   return tools[activeTool]
 }
 
-/** node-reuse snap radius: ~10 screen px expressed in world cm */
+/** pointer pick/snap radius: ~10 screen px expressed in world cm */
 const SNAP_PX = 10
 function toolContext(): ToolContext {
-  return { doc: editor.doc!, apply: editor.apply, snapDist: SNAP_PX / viewport.zoom }
+  return {
+    doc: editor.doc!,
+    apply: editor.apply,
+    select: editor.select,
+    snapDist: SNAP_PX / viewport.zoom,
+  }
 }
 function pointerInput(event: PointerEvent): PointerInput {
   return { world: screenToWorld(viewport, pointerPosition(event)), shift: event.shiftKey }
@@ -55,7 +61,10 @@ function markDirty() {
     frameId = undefined
     const ctx = canvas.value?.getContext('2d')
     if (!ctx || !editor.doc) return
-    render(ctx, viewport, editor.doc, palette, dpr, currentTool()?.preview)
+    render(ctx, viewport, editor.doc, palette, dpr, {
+      overlay: currentTool()?.preview,
+      selectedWallId: editor.selection?.kind === 'wall' ? editor.selection.id : null,
+    })
   })
 }
 
@@ -146,12 +155,15 @@ function onKeyUp(event: KeyboardEvent) {
 
 // the document is non-reactive; the store bumps `revision` on every change
 watch(() => editor.revision, markDirty)
+watch(() => editor.selection, markDirty)
 
 // switching tools (incl. Esc -> select) ends any in-progress interaction
 watch(
   () => activeTool,
-  (_next, prev) => {
+  (next, prev) => {
     if (prev) tools[prev]?.cancel?.()
+    // leaving select mode drops the highlight so it doesn't linger while drawing
+    if (next !== 'select') editor.select(null)
     markDirty()
   },
 )

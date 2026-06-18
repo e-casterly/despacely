@@ -6,7 +6,7 @@ import { createWallTool } from '../wallTool'
 function setup() {
   const doc = createEmptyDocument()
   const apply = vi.fn((command) => command.do(doc))
-  const ctx: ToolContext = { doc, apply, snapDist: 5 }
+  const ctx: ToolContext = { doc, apply, select: vi.fn(), snapDist: 5 }
   return { doc, ctx, apply }
 }
 
@@ -32,7 +32,7 @@ describe('wallTool', () => {
   it('chains segments sharing the corner node', () => {
     const tool = createWallTool()
     const { doc } = setup()
-    const ctx = { doc, apply: vi.fn((c) => c.do(doc)), snapDist: 5 }
+    const ctx = { doc, apply: vi.fn((c) => c.do(doc)), select: vi.fn(), snapDist: 5 }
 
     tool.onPointerDown!(down(0, 0).input, ctx)
     tool.onPointerDown!(down(100, 0).input, ctx)

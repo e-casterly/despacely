@@ -4,6 +4,7 @@ import { useToastStore } from '@/stores/toasts'
 import type { Command } from '../domain/commands'
 import { createEmptyDocument } from '../domain/operations'
 import type { SceneDocument } from '../domain/types'
+import type { Selection } from '../tools/types'
 import { documentDb } from '../persistence/documentDb'
 import { History } from './history'
 
@@ -22,9 +23,15 @@ export const useEditorStore = defineStore('editor', () => {
   const loadFailed = ref(false)
   const saveState = ref<SaveState>('saved')
 
+  const selection = ref<Selection | null>(null)
+
   const history = new History()
   const canUndo = ref(false)
   const canRedo = ref(false)
+
+  function select(value: Selection | null) {
+    selection.value = value
+  }
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -46,6 +53,7 @@ export const useEditorStore = defineStore('editor', () => {
   async function open(id: string) {
     projectId.value = id
     doc.value = null
+    selection.value = null
     loadFailed.value = false
     saveState.value = 'saved'
     history.clear()
@@ -124,6 +132,7 @@ export const useEditorStore = defineStore('editor', () => {
     await flush()
     projectId.value = null
     doc.value = null
+    selection.value = null
     loadFailed.value = false
     saveState.value = 'saved'
     history.clear()
@@ -134,11 +143,13 @@ export const useEditorStore = defineStore('editor', () => {
     projectId,
     doc,
     revision,
+    selection,
     loadFailed,
     saveState,
     canUndo,
     canRedo,
     open,
+    select,
     apply,
     undo,
     redo,

@@ -22,6 +22,12 @@ const GRID_TIERS = [
 /** A tier is skipped once its lines get closer than this on screen. */
 const MIN_LINE_GAP_PX = 6
 
+/** Transient view state layered on top of the document. */
+export interface RenderView {
+  overlay?: ToolOverlay | null
+  selectedWallId?: string | null
+}
+
 /** Full repaint: background, grid, then the document in layer order. */
 export function render(
   ctx: CanvasRenderingContext2D,
@@ -29,7 +35,7 @@ export function render(
   doc: SceneDocument,
   palette: CanvasPalette,
   dpr: number,
-  overlay?: ToolOverlay | null,
+  view: RenderView = {},
 ): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.fillStyle = palette.background
@@ -38,9 +44,9 @@ export function render(
   drawGrid(ctx, vp, palette)
 
   withWorldTransform(ctx, vp, dpr, () => {
-    drawWalls(ctx, doc, palette)
+    drawWalls(ctx, doc, palette, view.selectedWallId ?? null)
     drawItems(ctx, vp, doc)
-    if (overlay?.ghostWall) drawGhostWall(ctx, vp, overlay.ghostWall, palette)
+    if (view.overlay?.ghostWall) drawGhostWall(ctx, vp, view.overlay.ghostWall, palette)
   })
 }
 
@@ -112,11 +118,16 @@ function withWorldTransform(
   ctx.restore()
 }
 
-function drawWalls(ctx: CanvasRenderingContext2D, doc: SceneDocument, palette: CanvasPalette): void {
-  ctx.strokeStyle = palette.wall
+function drawWalls(
+  ctx: CanvasRenderingContext2D,
+  doc: SceneDocument,
+  palette: CanvasPalette,
+  selectedWallId: string | null,
+): void {
   ctx.lineCap = 'butt'
   for (const wall of doc.walls) {
     const { a, b } = wallSegment(doc, wall)
+    ctx.strokeStyle = wall.id === selectedWallId ? palette.accent : palette.wall
     ctx.lineWidth = wall.thickness
     ctx.beginPath()
     ctx.moveTo(a.x, a.y)
