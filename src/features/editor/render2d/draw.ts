@@ -1,7 +1,9 @@
-import { wallSegment } from '../domain/operations'
-import type { SceneDocument } from '../domain/types'
+import { nodeAt } from '../domain/operations'
+import { WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
+import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { ToolOverlay } from '../tools/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
+import { computeWallGeometry } from './wallJoints'
 
 export interface CanvasPalette {
   background: string
@@ -43,29 +45,42 @@ export function render(
 
   drawGrid(ctx, vp, palette)
 
+  // The ghost is drawn through the same path as real walls so the two miter
+  // against each other; node dots stay on the real doc so the cursor end has none.
+  const ghost = view.overlay?.ghostWall ? augmentWithGhost(doc, view.overlay.ghostWall) : null
   withWorldTransform(ctx, vp, dpr, () => {
-    drawWalls(ctx, doc, palette, view.selectedWallId ?? null)
+    drawWalls(ctx, ghost?.doc ?? doc, palette, view.selectedWallId ?? null, ghost?.ghostId ?? null)
     drawWallNodes(ctx, vp, doc, palette, view.selectedWallId ?? null)
     drawItems(ctx, vp, doc)
-    if (view.overlay?.ghostWall) drawGhostWall(ctx, vp, view.overlay.ghostWall, palette)
   })
 }
 
-function drawGhostWall(
-  ctx: CanvasRenderingContext2D,
-  vp: Viewport,
-  seg: { a: { x: number; y: number }; b: { x: number; y: number } },
-  palette: CanvasPalette,
-): void {
-  ctx.save()
-  ctx.strokeStyle = palette.accent
-  ctx.lineWidth = 2 / vp.zoom
-  ctx.setLineDash([8 / vp.zoom, 6 / vp.zoom])
-  ctx.beginPath()
-  ctx.moveTo(seg.a.x, seg.a.y)
-  ctx.lineTo(seg.b.x, seg.b.y)
-  ctx.stroke()
-  ctx.restore()
+/** Snap radius (cm) used to match a ghost endpoint onto an existing node. */
+const GHOST_SNAP = 0.5
+const GHOST_ID = '__ghost__'
+
+/**
+ * Returns a render-only copy of the doc with the in-progress wall appended as a
+ * temporary wall, its endpoints resolved onto existing nodes where they land so
+ * the joint miters on both sides. Null if the segment is degenerate.
+ */
+function augmentWithGhost(
+  doc: SceneDocument,
+  seg: { a: Vec2; b: Vec2 },
+): { doc: SceneDocument; ghostId: string } | null {
+  const nodes = { ...doc.nodes }
+  const resolve = (p: Vec2, tempId: NodeId): NodeId => {
+    const existing = nodeAt(doc, p, GHOST_SNAP)
+    if (existing) return existing.id
+    nodes[tempId] = { id: tempId, pos: p }
+    return tempId
+  }
+  const a = resolve(seg.a, '__ghost_a__')
+  const b = resolve(seg.b, '__ghost_b__')
+  if (a === b) return null
+
+  const ghost: Wall = { id: GHOST_ID, a, b, thickness: WALL_THICKNESS, height: WALL_HEIGHT }
+  return { doc: { ...doc, nodes, walls: [...doc.walls, ghost] }, ghostId: GHOST_ID }
 }
 
 /**
@@ -119,26 +134,53 @@ function withWorldTransform(
   ctx.restore()
 }
 
+/**
+ * Each wall is one filled polygon, mitered at shared nodes so neighbours tile
+ * without overlap or notch; too-sharp corners get a flat bevel (see wallJoints).
+ * Plain walls are drawn first, then the selected (accent) and ghost (translucent
+ * accent) walls on top so they sit above any neighbour they miter against.
+ */
 function drawWalls(
   ctx: CanvasRenderingContext2D,
   doc: SceneDocument,
   palette: CanvasPalette,
   selectedWallId: string | null,
+  ghostId: string | null,
 ): void {
-  ctx.lineCap = 'butt'
+  const { polygons } = computeWallGeometry(doc)
+  const isFront = (id: string): boolean => id === selectedWallId || id === ghostId
+
+  const front: string[] = []
+  ctx.globalAlpha = 1
+  ctx.fillStyle = palette.wall
   for (const wall of doc.walls) {
-    const { a, b } = wallSegment(doc, wall)
-    ctx.strokeStyle = wall.id === selectedWallId ? palette.accent : palette.wall
-    ctx.lineWidth = wall.thickness
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
+    const poly = polygons.get(wall.id)
+    if (!poly) continue
+    if (isFront(wall.id)) {
+      front.push(wall.id)
+      continue
+    }
+    fillPoly(ctx, poly)
   }
+  for (const id of front) {
+    ctx.globalAlpha = id === ghostId ? 0.5 : 1
+    ctx.fillStyle = palette.accent
+    fillPoly(ctx, polygons.get(id)!)
+  }
+  ctx.globalAlpha = 1
+}
+
+function fillPoly(ctx: CanvasRenderingContext2D, pts: Vec2[]): void {
+  if (pts.length === 0) return
+  ctx.beginPath()
+  ctx.moveTo(pts[0]!.x, pts[0]!.y)
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y)
+  ctx.closePath()
+  ctx.fill()
 }
 
 /** Vertex radius in screen pixels, kept zoom-independent. */
-const NODE_RADIUS_PX = 8
+const NODE_RADIUS_PX = 4
 
 /** Draws a dot at every node referenced by a wall, on top of the strokes. */
 function drawWallNodes(
