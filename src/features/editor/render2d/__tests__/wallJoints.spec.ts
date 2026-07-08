@@ -15,6 +15,27 @@ function hasPoint(poly: Vec2[], p: Vec2): boolean {
   return poly.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 1e-6)
 }
 
+/** Vertices where the outline turns against its winding (concave corners). */
+function reflexVertices(poly: Vec2[]): Vec2[] {
+  const n = poly.length
+  let area = 0
+  for (let i = 0; i < n; i++) {
+    const b = poly[i]!
+    const c = poly[(i + 1) % n]!
+    area += b.x * c.y - c.x * b.y
+  }
+  const winding = Math.sign(area)
+  const out: Vec2[] = []
+  for (let i = 0; i < n; i++) {
+    const a = poly[(i - 1 + n) % n]!
+    const b = poly[i]!
+    const c = poly[(i + 1) % n]!
+    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    if (cross * winding < -1e-9) out.push(b)
+  }
+  return out
+}
+
 /** Standard even-odd ray cast; boundary counts as inside for our purposes. */
 function inside(poly: Vec2[], p: Vec2): boolean {
   let hit = false
@@ -123,9 +144,11 @@ describe('computeWallGeometry', () => {
     expect(inside(M, { x: 0, y: 3 })).toBe(true)
   })
 
-  it('falls back to overlapping butts on a too-sharp corner, still covering the node', () => {
-    // A narrow wedge: two walls ~6° apart sharing the apex node. The miters run
-    // far past the node, so each wall keeps its square butt and they overlap.
+  it('tapers a sharp pair along their true seam, with no spike past the node', () => {
+    // A narrow wedge: two walls ~6° apart sharing the apex node. Their facing
+    // edges cross ~100 out — that crossing is the real seam corner, so the pair
+    // tapers into the node together. The outer crossing lands far behind the
+    // node; that side becomes square butts, never a spike out the back.
     const doc = makeDoc({ o: { x: 0, y: 0 }, l: { x: -10, y: 200 }, r: { x: 10, y: 200 } }, [
       { id: 'L', a: 'o', b: 'l', thickness: 10 },
       { id: 'R', a: 'o', b: 'r', thickness: 10 },
@@ -133,18 +156,62 @@ describe('computeWallGeometry', () => {
     const { polygons } = computeWallGeometry(doc)
     const L = polygons.get('L')!
     const R = polygons.get('R')!
-    // The apex node is covered by the overlapping strips — no gap.
-    expect(inside(L, { x: 0, y: 1 }) || inside(R, { x: 0, y: 1 })).toBe(true)
-    // No miter spike past the node: every node-side vertex hugs the apex, well
-    // inside the miter limit (4 × hw = 20).
+    // Nothing reaches behind the node — a square butt corner may dip under the
+    // node line by its tilt (≈ 0.25 here), but never a spike.
     for (const poly of [L, R]) {
-      const nodeSide = poly.filter((p) => p.y < 100)
-      expect(nodeSide.length).toBeGreaterThan(0)
-      for (const p of nodeSide) expect(Math.hypot(p.x, p.y)).toBeLessThan(20)
+      for (const p of poly) expect(p.y).toBeGreaterThanOrEqual(-1)
     }
+    // The walls tile the wedge along the bisector seam down to the node.
+    expect(hasPoint(L, { x: 0, y: 0 })).toBe(true)
+    expect(hasPoint(R, { x: 0, y: 0 })).toBe(true)
+    const seamL = L.find((p) => Math.abs(p.x) < 1e-6 && p.y > 50)
+    expect(seamL).toBeDefined()
+    expect(hasPoint(R, seamL!)).toBe(true)
+    expect(inside(L, { x: -1, y: 5 })).toBe(true)
+    expect(inside(L, { x: 1, y: 5 })).toBe(false)
+    expect(inside(R, { x: 1, y: 5 })).toBe(true)
+    // Beyond the seam crossing each wall is full-width again. At 120 along L's
+    // centreline both near-edge offsets are inside the polygon.
+    const dirL = { x: -10 / Math.hypot(10, 200), y: 200 / Math.hypot(10, 200) }
+    const mid = { x: dirL.x * 120, y: dirL.y * 120 }
+    expect(inside(L, { x: mid.x - dirL.y * 4.4, y: mid.y + dirL.x * 4.4 })).toBe(true)
+    expect(inside(L, { x: mid.x + dirL.y * 4.4, y: mid.y - dirL.x * 4.4 })).toBe(true)
     // Each wall still reaches its far end at full thickness — not collapsed.
     for (const poly of [L, R]) {
       expect(Math.max(...poly.map((p) => Math.hypot(p.x, p.y)))).toBeGreaterThan(190)
     }
+  })
+
+  it('shares the far seam corner with a very sharp neighbour', () => {
+    // P is ~8° from N1 (very sharp) while its other side opens onto the wide gap.
+    // Their facing edges cross far from the node; that crossing is still the
+    // shared seam corner, so both walls keep full thickness up to it and taper
+    // into the node together — no notch, no square-butt jog.
+    const doc = makeDoc(
+      {
+        o: { x: 0, y: 0 },
+        p: { x: -500, y: 80 },
+        n1: { x: -500, y: 160 },
+        n2: { x: -350, y: 350 },
+        n3: { x: 60, y: 500 },
+      },
+      [
+        { id: 'P', a: 'o', b: 'p', thickness: 28 },
+        { id: 'N1', a: 'o', b: 'n1', thickness: 28 },
+        { id: 'N2', a: 'o', b: 'n2', thickness: 28 },
+        { id: 'N3', a: 'o', b: 'n3', thickness: 28 },
+      ],
+    )
+    const { polygons } = computeWallGeometry(doc)
+    const P = polygons.get('P')!
+    // P fans out from the node and shares its far seam corner with N1.
+    expect(hasPoint(P, { x: 0, y: 0 })).toBe(true)
+    const seam = P.find((p) => Math.hypot(p.x, p.y) > 100 && Math.hypot(p.x, p.y) < 300)
+    expect(seam).toBeDefined()
+    expect(hasPoint(polygons.get('N1')!, seam!)).toBe(true)
+    // With true seams everywhere the outline stays convex — no folded-in notch.
+    expect(reflexVertices(P)).toHaveLength(0)
+    // The junction centre is still covered — by a neighbour that does tip there.
+    expect(inside(polygons.get('N2')!, { x: 0, y: 1 }) || inside(polygons.get('N3')!, { x: 0, y: 1 })).toBe(true)
   })
 })
