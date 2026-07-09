@@ -6,6 +6,7 @@ import {
   MoveNodeCommand,
   MoveWallCommand,
   RemoveItemCommand,
+  RemoveNodeCommand,
   RemoveWallCommand,
 } from '../commands'
 import { addNode, addWall, createEmptyDocument } from '../operations'
@@ -83,6 +84,49 @@ describe('RemoveWallCommand', () => {
     cmd.undo(doc)
     expect(doc.walls).toHaveLength(1)
     expect(Object.keys(doc.nodes)).toHaveLength(2)
+  })
+})
+
+describe('RemoveNodeCommand', () => {
+  it('deletes the vertex with every wall meeting at it and restores all on undo', () => {
+    // L-shape a-b, b-c: deleting corner b clears the whole document
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 100, y: 100 })
+    addWall(doc, a, b)
+    addWall(doc, b, c)
+
+    const cmd = new RemoveNodeCommand(b)
+    cmd.do(doc)
+    expect(doc.walls).toHaveLength(0)
+    expect(doc.nodes).toEqual({})
+
+    cmd.undo(doc)
+    expect(doc.walls).toHaveLength(2)
+    expect(Object.keys(doc.nodes)).toHaveLength(3)
+  })
+
+  it('keeps far endpoints that other walls still use', () => {
+    // chain a-b-c-d: deleting b removes walls a-b and b-c; c survives via c-d
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 200, y: 0 })
+    const d = addNode(doc, { x: 300, y: 0 })
+    addWall(doc, a, b)
+    addWall(doc, b, c)
+    const survivor = addWall(doc, c, d)
+
+    const cmd = new RemoveNodeCommand(b)
+    cmd.do(doc)
+
+    expect(doc.walls).toEqual([survivor])
+    expect(Object.keys(doc.nodes).sort()).toEqual([c, d].sort())
+
+    cmd.undo(doc)
+    expect(doc.walls).toHaveLength(3)
+    expect(Object.keys(doc.nodes)).toHaveLength(4)
   })
 })
 

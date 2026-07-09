@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef } from 'vue'
 import { useToastStore } from '@/stores/toasts'
-import type { Command } from '../domain/commands'
-import { createEmptyDocument } from '../domain/operations'
+import { RemoveNodeCommand, RemoveWallCommand, type Command } from '../domain/commands'
+import { createEmptyDocument, findNode, findWall } from '../domain/operations'
 import type { SceneDocument } from '../domain/types'
 import type { Selection } from '../tools/types'
 import { documentDb } from '../persistence/documentDb'
@@ -82,6 +82,19 @@ export const useEditorStore = defineStore('editor', () => {
     scheduleSave()
   }
 
+  /** Deletes the selected wall or vertex (with its walls) as one undoable command. */
+  function deleteSelection() {
+    if (!doc.value || !selection.value) return
+    const target = selection.value
+    selection.value = null
+    // a stale selection (entity already gone via undo) clears without a command
+    if (target.kind === 'wall') {
+      if (findWall(doc.value, target.id)) apply(new RemoveWallCommand(target.id))
+    } else if (findNode(doc.value, target.id)) {
+      apply(new RemoveNodeCommand(target.id))
+    }
+  }
+
   function undo() {
     if (!doc.value || !history.canUndo) return
     history.undo(doc.value)
@@ -151,6 +164,7 @@ export const useEditorStore = defineStore('editor', () => {
     open,
     select,
     apply,
+    deleteSelection,
     undo,
     redo,
     scheduleSave,

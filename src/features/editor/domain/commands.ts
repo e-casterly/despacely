@@ -6,6 +6,7 @@ import {
   moveNode,
   removeItem,
   removeWall,
+  wallsAtNode,
   type WallOptions,
 } from './operations'
 import type { Item, Node, NodeId, SceneDocument, Vec2, Wall } from './types'
@@ -78,6 +79,33 @@ export class RemoveWallCommand implements Command {
     if (!this.wall) return
     for (const node of this.removedNodes) doc.nodes[node.id] = node
     doc.walls.push(this.wall)
+  }
+}
+
+/**
+ * Deletes a vertex by deleting every wall that meets at it (a vertex cannot
+ * exist without walls); far endpoints left wall-less are GC'd along the way.
+ * Undo restores all removed walls and nodes.
+ */
+export class RemoveNodeCommand implements Command {
+  readonly label = 'Delete vertex'
+  private removedWalls: Wall[] = []
+  private removedNodes: Node[] = []
+
+  constructor(private readonly nodeId: NodeId) {}
+
+  do(doc: SceneDocument): void {
+    const before = { ...doc.nodes }
+    this.removedWalls = wallsAtNode(doc, this.nodeId)
+    for (const wall of this.removedWalls) removeWall(doc, wall.id)
+    this.removedNodes = Object.keys(before)
+      .filter((id) => !(id in doc.nodes))
+      .map((id) => before[id] as Node)
+  }
+
+  undo(doc: SceneDocument): void {
+    for (const node of this.removedNodes) doc.nodes[node.id] = node
+    doc.walls.push(...this.removedWalls)
   }
 }
 

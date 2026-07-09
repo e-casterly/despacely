@@ -34,6 +34,11 @@ function onKeyDown(event: KeyboardEvent) {
     activeTool.value = 'select'
     return
   }
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    event.preventDefault()
+    editor.deleteSelection()
+    return
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
     event.preventDefault()
     if (event.shiftKey) editor.redo()
