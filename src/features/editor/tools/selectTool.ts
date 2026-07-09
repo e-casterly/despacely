@@ -3,16 +3,19 @@ import { wallSegment } from '../domain/operations'
 import type { SceneDocument, Vec2, Wall } from '../domain/types'
 import type { PointerInput, Tool, ToolContext } from './types'
 
-/** Nearest wall whose body is under the point, within a pick tolerance (cm). */
+/** The wall the point sits deepest inside, within a pick tolerance (cm). */
 function pickWall(doc: SceneDocument, point: Vec2, slop: number): Wall | undefined {
   let best: Wall | undefined
-  let bestDist = Infinity
+  let bestDepth = Infinity
   for (const wall of doc.walls) {
     const { a, b } = wallSegment(doc, wall)
-    const dist = distToSegment(point, a, b)
-    if (dist <= wall.thickness / 2 + slop && dist < bestDist) {
+    // Depth relative to the wall's surface (negative inside the body). Ranking
+    // by depth, not by raw distance to the axis, so that next to a seam a thick
+    // wall's body beats a thin neighbour whose axis happens to be closer.
+    const depth = distToSegment(point, a, b) - wall.thickness / 2
+    if (depth <= slop && depth < bestDepth) {
       best = wall
-      bestDist = dist
+      bestDepth = depth
     }
   }
   return best

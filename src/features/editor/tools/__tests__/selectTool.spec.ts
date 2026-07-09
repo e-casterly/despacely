@@ -54,6 +54,23 @@ describe('selectTool', () => {
     expect(select).toHaveBeenCalledWith({ kind: 'wall', id: top.id })
   })
 
+  it('prefers the wall the point is inside over a nearer thin centreline', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const c = addNode(doc, { x: 0, y: 16 })
+    const d = addNode(doc, { x: 200, y: 16 })
+    const thick = addWall(doc, a, b, { thickness: 30 })
+    addWall(doc, c, d, { thickness: 4 })
+    const { ctx, select } = ctxFor(doc)
+
+    // (100, 12) is inside the thick wall's body (12 < 15) but nearer to the
+    // thin wall's axis (4cm) — raw-distance ranking would pick the thin wall.
+    createSelectTool().onPointerDown!(at(100, 12), ctx)
+
+    expect(select).toHaveBeenCalledWith({ kind: 'wall', id: thick.id })
+  })
+
   it('has no ghost preview', () => {
     expect(createSelectTool().preview).toBeNull()
   })
