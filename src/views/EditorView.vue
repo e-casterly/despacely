@@ -100,9 +100,7 @@ onBeforeUnmount(() => {
         @undo="editor.undo"
         @redo="editor.redo"
       />
-      <div class="relative flex-1">
-        <Canvas2D v-if="editor.doc" :active-tool="activeTool" />
-      </div>
+      <Canvas2D v-if="editor.doc" :active-tool="activeTool" />
     </div>
   </div>
 </template>
