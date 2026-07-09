@@ -36,7 +36,7 @@ export const useEditorStore = defineStore('editor', () => {
   let saveTimer: ReturnType<typeof setTimeout> | undefined
 
   /** Bumped on any document change to drive the canvas redraw. */
-  function touch() {
+  function bumpRevision() {
     revision.value++
   }
 
@@ -66,7 +66,7 @@ export const useEditorStore = defineStore('editor', () => {
         doc.value = createEmptyDocument()
         await documentDb.save(id, doc.value)
       }
-      touch()
+      bumpRevision()
     } catch (error) {
       loadFailed.value = true
       reportError('open the scene', error)
@@ -78,7 +78,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!doc.value) return
     history.apply(doc.value, command)
     syncHistory()
-    touch()
+    bumpRevision()
     scheduleSave()
   }
 
@@ -86,7 +86,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!doc.value || !history.canUndo) return
     history.undo(doc.value)
     syncHistory()
-    touch()
+    bumpRevision()
     scheduleSave()
   }
 
@@ -94,7 +94,7 @@ export const useEditorStore = defineStore('editor', () => {
     if (!doc.value || !history.canRedo) return
     history.redo(doc.value)
     syncHistory()
-    touch()
+    bumpRevision()
     scheduleSave()
   }
 

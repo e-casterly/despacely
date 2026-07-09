@@ -100,6 +100,28 @@ export class MoveNodeCommand implements Command {
   }
 }
 
+/** One vertex relocation, used to batch several into a single history entry. */
+export interface NodeMove {
+  nodeId: NodeId
+  from: Vec2
+  to: Vec2
+}
+
+/** Moves a whole wall by relocating both endpoints; shared corners follow. */
+export class MoveWallCommand implements Command {
+  readonly label = 'Move wall'
+
+  constructor(private readonly moves: NodeMove[]) {}
+
+  do(doc: SceneDocument): void {
+    for (const move of this.moves) moveNode(doc, move.nodeId, move.to)
+  }
+
+  undo(doc: SceneDocument): void {
+    for (const move of this.moves) moveNode(doc, move.nodeId, move.from)
+  }
+}
+
 /** Adds a furniture item. */
 export class AddItemCommand implements Command {
   readonly label = 'Add item'

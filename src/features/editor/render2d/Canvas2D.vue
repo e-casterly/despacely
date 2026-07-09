@@ -55,7 +55,7 @@ let panning = false
 let lastPointer: Vec2 | null = null
 
 /** Requests a single repaint on the next frame; repeated calls coalesce into one. */
-function markDirty() {
+function requestRepaint() {
   if (frameId !== undefined) return
   frameId = requestAnimationFrame(() => {
     frameId = undefined
@@ -89,7 +89,7 @@ function resize() {
   viewport.height = rect.height
   canvas.value.width = Math.round(rect.width * dpr)
   canvas.value.height = Math.round(rect.height * dpr)
-  markDirty()
+  requestRepaint()
 }
 
 function pointerPosition(event: PointerEvent | WheelEvent): Vec2 {
@@ -99,7 +99,7 @@ function pointerPosition(event: PointerEvent | WheelEvent): Vec2 {
 
 function onWheel(event: WheelEvent) {
   zoomAt(viewport, pointerPosition(event), Math.exp(-event.deltaY * 0.002))
-  markDirty()
+  requestRepaint()
 }
 
 function onPointerDown(event: PointerEvent) {
@@ -113,8 +113,10 @@ function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
   const tool = currentTool()
   if (tool?.onPointerDown) {
+    // capture so drags keep receiving move/up outside the canvas
+    canvas.value?.setPointerCapture(event.pointerId)
     tool.onPointerDown(pointerInput(event), toolContext())
-    markDirty()
+    requestRepaint()
   }
 }
 
@@ -122,13 +124,15 @@ function onPointerMove(event: PointerEvent) {
   if (panning && lastPointer) {
     panBy(viewport, { x: event.clientX - lastPointer.x, y: event.clientY - lastPointer.y })
     lastPointer = { x: event.clientX, y: event.clientY }
-    markDirty()
+    requestRepaint()
     return
   }
   const tool = currentTool()
   if (tool?.onPointerMove) {
+    const hadPreview = tool.preview !== null
     tool.onPointerMove(pointerInput(event), toolContext())
-    if (tool.preview) markDirty()
+    // repaint when a preview is showing, and once more when it disappears
+    if (tool.preview || hadPreview) requestRepaint()
   }
 }
 
@@ -141,12 +145,18 @@ function onPointerUp(event: PointerEvent) {
   const tool = currentTool()
   if (tool?.onPointerUp) {
     tool.onPointerUp(pointerInput(event), toolContext())
-    markDirty()
+    requestRepaint()
   }
 }
 
 function onKeyDown(event: KeyboardEvent) {
   if (event.code === 'Space' && !event.repeat) spaceHeld.value = true
+  // EditorView switches Esc back to select; when select is already active
+  // the tool watch won't fire, so cancel any in-progress drag here too
+  if (event.key === 'Escape') {
+    currentTool()?.cancel?.()
+    requestRepaint()
+  }
 }
 
 function onKeyUp(event: KeyboardEvent) {
@@ -154,8 +164,8 @@ function onKeyUp(event: KeyboardEvent) {
 }
 
 // the document is non-reactive; the store bumps `revision` on every change
-watch(() => editor.revision, markDirty)
-watch(() => editor.selection, markDirty)
+watch(() => editor.revision, requestRepaint)
+watch(() => editor.selection, requestRepaint)
 
 // switching tools (incl. Esc -> select) ends any in-progress interaction
 watch(
@@ -164,7 +174,7 @@ watch(
     if (prev) tools[prev]?.cancel?.()
     // leaving select mode drops the highlight so it doesn't linger while drawing
     if (next !== 'select') editor.select(null)
-    markDirty()
+    requestRepaint()
   },
 )
 
@@ -175,7 +185,7 @@ onMounted(() => {
   if (container.value) resizeObserver.observe(container.value)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
-  markDirty()
+  requestRepaint()
 })
 
 onBeforeUnmount(() => {

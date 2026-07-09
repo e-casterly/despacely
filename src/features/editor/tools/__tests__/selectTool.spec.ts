@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Command } from '../../domain/commands'
 import { addNode, addWall, createEmptyDocument } from '../../domain/operations'
 import type { SceneDocument } from '../../domain/types'
-import type { ToolContext } from '../types'
+import type { Selection, ToolContext } from '../types'
 import { createSelectTool } from '../selectTool'
 
 function docWithWall(): { doc: SceneDocument; wallId: string } {
@@ -13,9 +14,10 @@ function docWithWall(): { doc: SceneDocument; wallId: string } {
 }
 
 function ctxFor(doc: SceneDocument) {
-  const select = vi.fn()
-  const ctx: ToolContext = { doc, apply: vi.fn(), select, snapDist: 5 }
-  return { ctx, select }
+  const select = vi.fn<(selection: Selection | null) => void>()
+  const apply = vi.fn<(command: Command) => void>()
+  const ctx: ToolContext = { doc, apply, select, snapDist: 5 }
+  return { ctx, select, apply }
 }
 
 const at = (x: number, y: number) => ({ world: { x, y }, shift: false })
@@ -73,5 +75,145 @@ describe('selectTool', () => {
 
   it('has no ghost preview', () => {
     expect(createSelectTool().preview).toBeNull()
+  })
+})
+
+describe('selectTool node drag', () => {
+  function nodeIds(doc: SceneDocument): string[] {
+    return Object.keys(doc.nodes)
+  }
+
+  it('drags a vertex: snapped preview, one command on pointerup', () => {
+    const { doc } = docWithWall()
+    const { ctx, apply } = ctxFor(doc)
+    const nodeA = nodeIds(doc)[0]!
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(1, -2), ctx) // grab near the (0,0) vertex
+    tool.onPointerMove!(at(48, 33), ctx)
+
+    expect(tool.preview).toEqual({ movedNodes: { [nodeA]: { x: 50, y: 30 } } })
+    expect(doc.nodes[nodeA]!.pos).toEqual({ x: 0, y: 0 }) // doc untouched until pointerup
+
+    tool.onPointerUp!(at(48, 33), ctx)
+
+    expect(apply).toHaveBeenCalledTimes(1)
+    const command = apply.mock.calls[0]![0]
+    command.do(doc)
+    expect(doc.nodes[nodeA]!.pos).toEqual({ x: 50, y: 30 })
+    command.undo(doc)
+    expect(doc.nodes[nodeA]!.pos).toEqual({ x: 0, y: 0 })
+    expect(tool.preview).toBeNull()
+  })
+
+  it('grabbing a vertex does not change the selection', () => {
+    const { doc } = docWithWall()
+    const { ctx, select } = ctxFor(doc)
+
+    createSelectTool().onPointerDown!(at(1, -2), ctx)
+
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('a click without movement applies nothing', () => {
+    const { doc } = docWithWall()
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(1, -2), ctx)
+    tool.onPointerMove!(at(2, -1), ctx) // jitter under half a grid step
+    tool.onPointerUp!(at(2, -1), ctx)
+
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('refuses a position that would collapse a wall to zero length', () => {
+    const { doc } = docWithWall()
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(1, -2), ctx)
+    tool.onPointerMove!(at(199, 1), ctx) // snaps onto the other endpoint (200,0)
+
+    expect(tool.preview).toBeNull() // stays at the last valid spot: the origin
+
+    tool.onPointerUp!(at(199, 1), ctx)
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('cancel drops the drag without applying', () => {
+    const { doc } = docWithWall()
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(1, -2), ctx)
+    tool.onPointerMove!(at(50, 30), ctx)
+    tool.cancel!()
+
+    expect(tool.preview).toBeNull()
+    tool.onPointerUp!(at(50, 30), ctx)
+    expect(apply).not.toHaveBeenCalled()
+  })
+})
+
+describe('selectTool wall drag', () => {
+  it('drags the whole wall: snapped delta, both endpoints in one command', () => {
+    const { doc, wallId } = docWithWall()
+    const { ctx, select, apply } = ctxFor(doc)
+    const [a, b] = Object.keys(doc.nodes) as [string, string]
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 3), ctx) // wall body, away from both vertices
+    expect(select).toHaveBeenCalledWith({ kind: 'wall', id: wallId })
+
+    tool.onPointerMove!(at(102, 51), ctx) // raw delta (2,48) -> snapped (0,50)
+    expect(tool.preview).toEqual({
+      movedNodes: { [a]: { x: 0, y: 50 }, [b]: { x: 200, y: 50 } },
+    })
+    expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 }) // doc untouched until pointerup
+
+    tool.onPointerUp!(at(102, 51), ctx)
+
+    expect(apply).toHaveBeenCalledTimes(1)
+    const command = apply.mock.calls[0]![0]
+    command.do(doc)
+    expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 50 })
+    expect(doc.nodes[b]!.pos).toEqual({ x: 200, y: 50 })
+    command.undo(doc)
+    expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 })
+    expect(doc.nodes[b]!.pos).toEqual({ x: 200, y: 0 })
+  })
+
+  it('a click with sub-grid jitter applies nothing', () => {
+    const { doc } = docWithWall()
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 3), ctx)
+    tool.onPointerMove!(at(102, 4), ctx) // under half a grid step
+    tool.onPointerUp!(at(102, 4), ctx)
+
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('refuses a delta that would collapse a neighbouring wall', () => {
+    // chain a-(0,0) b-(50,0) c-(50,50): dragging wall a-b down by 50 would put
+    // b onto c, collapsing wall b-c to zero length
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 50, y: 0 })
+    const c = addNode(doc, { x: 50, y: 50 })
+    addWall(doc, a, b, { thickness: 10 })
+    addWall(doc, b, c, { thickness: 10 })
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(25, 2), ctx) // grab the horizontal wall
+    tool.onPointerMove!(at(25, 52), ctx) // drag down by exactly 50
+
+    expect(tool.preview).toBeNull() // move refused, nothing shown
+
+    tool.onPointerUp!(at(25, 52), ctx)
+    expect(apply).not.toHaveBeenCalled()
   })
 })

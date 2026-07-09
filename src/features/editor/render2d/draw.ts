@@ -45,14 +45,28 @@ export function render(
 
   drawGrid(ctx, vp, palette)
 
+  // The doc as the user currently sees it: a drag preview overrides node
+  // positions on a render-only copy, so the real document stays untouched
+  // until the move is committed as a command.
+  const viewDoc = view.overlay?.movedNodes ? withMovedNodes(doc, view.overlay.movedNodes) : doc
   // The ghost is drawn through the same path as real walls so the two miter
   // against each other; node dots stay on the real doc so the cursor end has none.
-  const ghost = view.overlay?.ghostWall ? augmentWithGhost(doc, view.overlay.ghostWall) : null
+  const ghost = view.overlay?.ghostWall ? augmentWithGhost(viewDoc, view.overlay.ghostWall) : null
   withWorldTransform(ctx, vp, dpr, () => {
-    drawWalls(ctx, ghost?.doc ?? doc, palette, view.selectedWallId ?? null, ghost?.ghostId ?? null)
-    drawWallNodes(ctx, vp, doc, palette, view.selectedWallId ?? null)
-    drawItems(ctx, vp, doc)
+    drawWalls(ctx, ghost?.doc ?? viewDoc, palette, view.selectedWallId ?? null, ghost?.ghostId ?? null)
+    drawWallNodes(ctx, vp, viewDoc, palette, view.selectedWallId ?? null)
+    drawItems(ctx, vp, viewDoc)
   })
+}
+
+/** Render-only copy of the doc with some node positions overridden. */
+function withMovedNodes(doc: SceneDocument, moved: Record<NodeId, Vec2>): SceneDocument {
+  const nodes = { ...doc.nodes }
+  for (const [id, pos] of Object.entries(moved)) {
+    const node = nodes[id]
+    if (node) nodes[id] = { ...node, pos }
+  }
+  return { ...doc, nodes }
 }
 
 /** Snap radius (cm) used to match a ghost endpoint onto an existing node. */

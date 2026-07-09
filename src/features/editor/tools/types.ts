@@ -1,5 +1,5 @@
 import type { Command } from '../domain/commands'
-import type { SceneDocument, Vec2 } from '../domain/types'
+import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 
 /** The editor's active interaction mode. 'select' is the neutral mode. */
 export type ToolId = 'select' | 'wall'
@@ -25,6 +25,8 @@ export interface ToolContext {
 /** Transient visuals a tool draws over the scene (e.g. the wall being placed). */
 export interface ToolOverlay {
   ghostWall?: { a: Vec2; b: Vec2 }
+  /** Drag preview: render these nodes (and walls on them) at overridden positions. */
+  movedNodes?: Record<NodeId, Vec2>
 }
 
 /**

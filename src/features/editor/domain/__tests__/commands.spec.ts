@@ -4,6 +4,7 @@ import {
   AddWallCommand,
   MoveItemCommand,
   MoveNodeCommand,
+  MoveWallCommand,
   RemoveItemCommand,
   RemoveWallCommand,
 } from '../commands'
@@ -95,6 +96,26 @@ describe('MoveNodeCommand', () => {
     expect(doc.nodes[n]!.pos).toEqual({ x: 50, y: 50 })
     cmd.undo(doc)
     expect(doc.nodes[n]!.pos).toEqual({ x: 0, y: 0 })
+  })
+})
+
+describe('MoveWallCommand', () => {
+  it('moves both endpoints as one entry and reverts them together', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    addWall(doc, a, b)
+    const cmd = new MoveWallCommand([
+      { nodeId: a, from: { x: 0, y: 0 }, to: { x: 0, y: 50 } },
+      { nodeId: b, from: { x: 100, y: 0 }, to: { x: 100, y: 50 } },
+    ])
+
+    cmd.do(doc)
+    expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 50 })
+    expect(doc.nodes[b]!.pos).toEqual({ x: 100, y: 50 })
+    cmd.undo(doc)
+    expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 })
+    expect(doc.nodes[b]!.pos).toEqual({ x: 100, y: 0 })
   })
 })
 
