@@ -1,7 +1,7 @@
 import { nodeAt } from '../domain/operations'
 import { WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
-import type { ToolOverlay } from '../tools/types'
+import type { Selection, ToolOverlay } from '../tools/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
 import { computeWallGeometry } from './wallJoints'
 
@@ -27,7 +27,7 @@ const MIN_LINE_GAP_PX = 6
 /** Transient view state layered on top of the document. */
 export interface RenderView {
   overlay?: ToolOverlay | null
-  selectedWallId?: string | null
+  selection?: Selection | null
 }
 
 /** Full repaint: background, grid, then the document in layer order. */
@@ -45,6 +45,8 @@ export function render(
 
   drawGrid(ctx, vp, palette)
 
+  const selectedWallId = view.selection?.kind === 'wall' ? view.selection.id : null
+  const selectedNodeId = view.selection?.kind === 'node' ? view.selection.id : null
   // The doc as the user currently sees it: a drag preview overrides node
   // positions on a render-only copy, so the real document stays untouched
   // until the move is committed as a command.
@@ -53,8 +55,8 @@ export function render(
   // against each other; node dots stay on the real doc so the cursor end has none.
   const ghost = view.overlay?.ghostWall ? augmentWithGhost(viewDoc, view.overlay.ghostWall) : null
   withWorldTransform(ctx, vp, dpr, () => {
-    drawWalls(ctx, ghost?.doc ?? viewDoc, palette, view.selectedWallId ?? null, ghost?.ghostId ?? null)
-    drawWallNodes(ctx, vp, viewDoc, palette, view.selectedWallId ?? null)
+    drawWalls(ctx, ghost?.doc ?? viewDoc, palette, selectedWallId, ghost?.ghostId ?? null)
+    drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
   })
 }
@@ -193,8 +195,11 @@ function fillPoly(ctx: CanvasRenderingContext2D, pts: Vec2[]): void {
   ctx.fill()
 }
 
-/** Vertex radius in screen pixels, kept zoom-independent. */
+/** Vertex dot radius in screen px, zoom-independent like Figma's anchor handles. */
 const NODE_RADIUS_PX = 4
+/** The selected vertex is drawn larger, so it reads differently from the
+ * accent dots that mark the endpoints of a selected wall. */
+const SELECTED_NODE_SCALE = 1.5
 
 /** Draws a dot at every node referenced by a wall, on top of the strokes. */
 function drawWallNodes(
@@ -203,9 +208,12 @@ function drawWallNodes(
   doc: SceneDocument,
   palette: CanvasPalette,
   selectedWallId: string | null,
+  selectedNodeId: NodeId | null,
 ): void {
   const radius = NODE_RADIUS_PX / vp.zoom
+  // accent both endpoints of a selected wall, or the one selected node
   const selected = new Set<string>()
+  if (selectedNodeId) selected.add(selectedNodeId)
   const used = new Set<string>()
   for (const wall of doc.walls) {
     used.add(wall.a)
@@ -222,7 +230,8 @@ function drawWallNodes(
     if (!node) continue
     ctx.fillStyle = selected.has(id) ? palette.accent : palette.wall
     ctx.beginPath()
-    ctx.arc(node.pos.x, node.pos.y, radius, 0, Math.PI * 2)
+    const r = id === selectedNodeId ? radius * SELECTED_NODE_SCALE : radius
+    ctx.arc(node.pos.x, node.pos.y, r, 0, Math.PI * 2)
     ctx.fill()
     ctx.stroke()
   }

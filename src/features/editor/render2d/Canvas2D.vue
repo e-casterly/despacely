@@ -63,7 +63,7 @@ function requestRepaint() {
     if (!ctx || !editor.doc) return
     render(ctx, viewport, editor.doc, palette, dpr, {
       overlay: currentTool()?.preview,
-      selectedWallId: editor.selection?.kind === 'wall' ? editor.selection.id : null,
+      selection: editor.selection,
     })
   })
 }

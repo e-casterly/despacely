@@ -106,13 +106,14 @@ describe('selectTool node drag', () => {
     expect(tool.preview).toBeNull()
   })
 
-  it('grabbing a vertex does not change the selection', () => {
+  it('grabbing a vertex selects it', () => {
     const { doc } = docWithWall()
     const { ctx, select } = ctxFor(doc)
+    const nodeA = Object.keys(doc.nodes)[0]!
 
     createSelectTool().onPointerDown!(at(1, -2), ctx)
 
-    expect(select).not.toHaveBeenCalled()
+    expect(select).toHaveBeenCalledWith({ kind: 'node', id: nodeA })
   })
 
   it('a click without movement applies nothing', () => {

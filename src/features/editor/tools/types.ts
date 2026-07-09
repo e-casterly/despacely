@@ -10,8 +10,8 @@ export interface PointerInput {
   shift: boolean
 }
 
-/** What is currently selected in the editor (extends to nodes/items later). */
-export type Selection = { kind: 'wall'; id: string }
+/** What is currently selected in the editor (extends to items later). */
+export type Selection = { kind: 'wall'; id: string } | { kind: 'node'; id: NodeId }
 
 /** Everything a tool needs to read the scene and commit edits. */
 export interface ToolContext {

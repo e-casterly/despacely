@@ -60,10 +60,10 @@ function draggedNodes(drag: Drag): Record<NodeId, Vec2> {
 }
 
 /**
- * Default mode: click a wall to select it, click empty space to clear.
- * Dragging moves things (grid-snapped): a vertex dot moves that vertex, a wall
- * body moves the whole wall; shared corners follow either way. The document is
- * only touched on pointerup, as a single undoable command.
+ * Default mode: click a wall or a vertex dot to select it, click empty space
+ * to clear. Dragging moves things (grid-snapped): a vertex dot moves that
+ * vertex, a wall body moves the whole wall; shared corners follow either way.
+ * The document is only touched on pointerup, as a single undoable command.
  */
 export function createSelectTool(): Tool {
   let drag: Drag | null = null
@@ -78,10 +78,10 @@ export function createSelectTool(): Tool {
     },
 
     onPointerDown(input: PointerInput, ctx: ToolContext) {
-      // Vertex dots sit on top of walls, so they win the pick; grabbing one
-      // does not change the selection (a node may be shared by many walls).
+      // Vertex dots sit on top of walls, so they win the pick
       const node = nodeAt(ctx.doc, input.world, ctx.snapDist)
       if (node) {
+        ctx.select({ kind: 'node', id: node.id })
         drag = { kind: 'node', nodeId: node.id, from: node.pos, to: node.pos }
         return
       }
