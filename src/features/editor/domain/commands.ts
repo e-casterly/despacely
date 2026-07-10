@@ -82,6 +82,30 @@ export class RemoveWallCommand implements Command {
   }
 }
 
+/** Edits a wall's scalar properties as one history entry; a partial patch. */
+export class SetWallPropsCommand implements Command {
+  readonly label = 'Edit wall'
+  private before: WallOptions = {}
+
+  constructor(
+    private readonly wallId: string,
+    private readonly props: WallOptions,
+  ) {}
+
+  do(doc: SceneDocument): void {
+    const wall = findWall(doc, this.wallId)
+    if (!wall) return
+    this.before = { thickness: wall.thickness, height: wall.height }
+    if (this.props.thickness !== undefined) wall.thickness = this.props.thickness
+    if (this.props.height !== undefined) wall.height = this.props.height
+  }
+
+  undo(doc: SceneDocument): void {
+    const wall = findWall(doc, this.wallId)
+    if (wall) Object.assign(wall, this.before)
+  }
+}
+
 /**
  * Deletes a vertex by deleting every wall that meets at it (a vertex cannot
  * exist without walls); far endpoints left wall-less are GC'd along the way.

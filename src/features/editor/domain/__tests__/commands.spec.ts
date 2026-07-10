@@ -8,6 +8,7 @@ import {
   RemoveItemCommand,
   RemoveNodeCommand,
   RemoveWallCommand,
+  SetWallPropsCommand,
 } from '../commands'
 import { addNode, addWall, createEmptyDocument } from '../operations'
 import type { Item } from '../types'
@@ -84,6 +85,49 @@ describe('RemoveWallCommand', () => {
     cmd.undo(doc)
     expect(doc.walls).toHaveLength(1)
     expect(Object.keys(doc.nodes)).toHaveLength(2)
+  })
+})
+
+describe('SetWallPropsCommand', () => {
+  it('patches only the given props and restores them on undo', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const wall = addWall(doc, a, b) // defaults: thickness 10, height 270
+
+    const cmd = new SetWallPropsCommand(wall.id, { thickness: 30 })
+    cmd.do(doc)
+    expect(wall.thickness).toBe(30)
+    expect(wall.height).toBe(270) // untouched by the partial patch
+
+    cmd.undo(doc)
+    expect(wall.thickness).toBe(10)
+    expect(wall.height).toBe(270)
+  })
+
+  it('redoes with the same values', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const wall = addWall(doc, a, b)
+
+    const cmd = new SetWallPropsCommand(wall.id, { thickness: 30, height: 300 })
+    cmd.do(doc)
+    cmd.undo(doc)
+    cmd.do(doc) // redo
+
+    expect(wall.thickness).toBe(30)
+    expect(wall.height).toBe(300)
+  })
+
+  it('does nothing for a missing wall', () => {
+    const doc = createEmptyDocument()
+    const cmd = new SetWallPropsCommand('nope', { thickness: 30 })
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(doc.walls).toHaveLength(0)
   })
 })
 
