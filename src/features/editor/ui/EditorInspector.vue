@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BaseButton from '@/components/ui/BaseButton.vue'
 import { MoveNodeCommand, SetWallPropsCommand } from '../domain/commands'
 import { collapsesAWall, findNode, findWall, wallsAtNode, wallSegment } from '../domain/operations'
 import { useEditorStore } from '../store/editorStore'
@@ -135,5 +136,15 @@ function commitNodeCoord(axis: 'x' | 'y', next: number) {
         </div>
       </dl>
     </template>
+
+    <BaseButton
+      variant="danger"
+      size="sm"
+      class="w-full"
+      :title="node ? 'Deletes the vertex and every wall meeting at it' : undefined"
+      @click="editor.deleteSelection()"
+    >
+      {{ wall ? 'Delete wall' : 'Delete vertex' }}
+    </BaseButton>
   </aside>
 </template>
