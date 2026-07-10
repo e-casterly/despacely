@@ -4,6 +4,7 @@ import {
   addNode,
   addWall,
   addWallBetween,
+  collapsesAWall,
   createEmptyDocument,
   findItem,
   moveItem,
@@ -114,6 +115,41 @@ describe('removeWall (orphan GC)', () => {
     removeWall(doc, wall.id)
 
     expect(doc.nodes).toEqual({})
+  })
+})
+
+describe('collapsesAWall', () => {
+  it('detects a node landing on its wall neighbour', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    addWall(doc, a, b)
+
+    expect(collapsesAWall(doc, { [a]: { x: 100, y: 0 } })).toBe(true)
+    expect(collapsesAWall(doc, { [a]: { x: 50, y: 50 } })).toBe(false)
+  })
+
+  it('checks moved positions against each other, not only the doc', () => {
+    // both endpoints moved onto the same point
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    addWall(doc, a, b)
+
+    expect(collapsesAWall(doc, { [a]: { x: 5, y: 5 }, [b]: { x: 5, y: 5 } })).toBe(true)
+  })
+
+  it('ignores unrelated nodes at equal positions', () => {
+    // two disconnected walls may share coordinates freely
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 0, y: 100 })
+    const d = addNode(doc, { x: 100, y: 100 })
+    addWall(doc, a, b)
+    addWall(doc, c, d)
+
+    expect(collapsesAWall(doc, { [c]: { x: 0, y: 0 } })).toBe(false) // lands on a, no shared wall
   })
 })
 

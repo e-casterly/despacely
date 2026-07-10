@@ -1,6 +1,6 @@
 import { MoveNodeCommand, MoveWallCommand } from '../domain/commands'
 import { distToSegment } from '../domain/geometry'
-import { nodeAt, wallSegment } from '../domain/operations'
+import { collapsesAWall, nodeAt, wallSegment } from '../domain/operations'
 import { snap } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolOverlay } from './types'
@@ -30,15 +30,6 @@ function snapPoint(p: Vec2): Vec2 {
 
 function samePoint(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y
-}
-
-/** True if rendering nodes at the moved positions would give some wall zero length. */
-function collapsesAWall(doc: SceneDocument, moved: Record<NodeId, Vec2>): boolean {
-  return doc.walls.some((wall) => {
-    const a = moved[wall.a] ?? doc.nodes[wall.a]!.pos
-    const b = moved[wall.b] ?? doc.nodes[wall.b]!.pos
-    return samePoint(a, b)
-  })
 }
 
 type Drag =

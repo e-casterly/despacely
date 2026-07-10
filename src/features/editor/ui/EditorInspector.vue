@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { SetWallPropsCommand } from '../domain/commands'
-import { findWall, wallSegment } from '../domain/operations'
+import { MoveNodeCommand, SetWallPropsCommand } from '../domain/commands'
+import { collapsesAWall, findNode, findWall, wallsAtNode, wallSegment } from '../domain/operations'
 import { useEditorStore } from '../store/editorStore'
+import { useDocSnapshot } from '../store/useDocSnapshot'
+import EditorNumberField from './EditorNumberField.vue'
 
 const editor = useEditorStore()
 
@@ -17,90 +18,122 @@ const PROP_LIMITS = {
   height: { min: 30, max: 1000 },
 } as const
 
-/**
- * Commits an edited value on `change` (fires on blur; Enter blurs first), so
- * typing stays local to the input and history gets one entry per edit.
- * Invalid input falls back to the current value; out-of-range input is clamped.
- */
-function commitProp(key: keyof typeof PROP_LIMITS, event: Event) {
-  const input = event.target as HTMLInputElement
-  if (!wall.value) return
-  const current = wall.value[key]
-  const { min, max } = PROP_LIMITS[key]
-  const raw = input.value.trim()
-  // Number('') === 0, so an emptied field must be treated as invalid, not as 0
-  const parsed = raw === '' ? NaN : Math.round(Number(raw))
-  const next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : current
-  // normalize what the user sees (NaN, clamped or decimal input)
-  input.value = String(next)
-  if (next !== current) editor.apply(new SetWallPropsCommand(wall.value.id, { [key]: next }))
-}
+/** Coordinates carry no physical meaning, so the clamp only guards typos (±1 km). */
+const COORD_LIMIT = { min: -100_000, max: 100_000 }
 
-function blurOnEnter(event: KeyboardEvent) {
-  ;(event.target as HTMLInputElement).blur()
-}
-
-// The document is non-reactive; reading `revision` re-runs this on every change.
-// Return a fresh snapshot, not the doc's own object: a same-reference result
-// would not notify dependents (computeds/template) even though its fields changed.
-const wall = computed(() => {
-  void editor.revision
-  if (!editor.doc || editor.selection?.kind !== 'wall') return null
-  const found = findWall(editor.doc, editor.selection.id)
-  return found ? { ...found } : null
+// view models of the current selection; useDocSnapshot re-reads them on every
+// document change and keeps doc references out of the component
+const wall = useDocSnapshot((doc) => {
+  if (editor.selection?.kind !== 'wall') return null
+  const found = findWall(doc, editor.selection.id)
+  if (!found) return null
+  const { a, b } = wallSegment(doc, found)
+  return { ...found, length: Math.round(Math.hypot(b.x - a.x, b.y - a.y) * 10) / 10 }
 })
 
-const length = computed(() => {
-  if (!editor.doc || !wall.value) return 0
-  const { a, b } = wallSegment(editor.doc, wall.value)
-  return Math.round(Math.hypot(b.x - a.x, b.y - a.y) * 10) / 10
+const node = useDocSnapshot((doc) => {
+  if (editor.selection?.kind !== 'node') return null
+  const found = findNode(doc, editor.selection.id)
+  if (!found) return null
+  return {
+    id: found.id,
+    x: found.pos.x,
+    y: found.pos.y,
+    wallCount: wallsAtNode(doc, found.id).length,
+  }
 })
+
+function commitWallProp(key: keyof typeof PROP_LIMITS, next: number) {
+  if (wall.value) editor.apply(new SetWallPropsCommand(wall.value.id, { [key]: next }))
+}
+
+function commitNodeCoord(axis: 'x' | 'y', next: number) {
+  if (!node.value || !editor.doc) return
+  const from = { x: node.value.x, y: node.value.y }
+  const to = { ...from, [axis]: next }
+  // refuse a position that would collapse a wall; the field snaps back itself
+  if (collapsesAWall(editor.doc, { [node.value.id]: to })) return
+  editor.apply(new MoveNodeCommand(node.value.id, from, to))
+}
 </script>
 
 <template>
   <aside
-    v-if="wall"
+    v-if="wall || node"
     class="absolute right-3 top-3 flex w-64 flex-col gap-3 rounded-lg border border-border bg-surface p-3 shadow-md"
   >
-    <h2 class="text-xs font-semibold uppercase tracking-wide text-text-muted">Wall</h2>
+    <template v-if="wall">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-text-muted">Wall</h2>
 
-    <dl class="flex flex-col gap-2 text-sm">
-      <div class="flex items-center justify-between">
-        <dt class="text-text-muted">Length</dt>
-        <dd>{{ length }} cm</dd>
-      </div>
-      <div class="flex items-center justify-between">
-        <dt class="text-text-muted">Thickness</dt>
-        <dd class="flex items-center gap-1.5">
-          <input
-            type="number"
-            class="h-7 w-20 rounded-md border border-border bg-surface px-2 text-right text-sm text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
-            :value="wall.thickness"
-            :min="PROP_LIMITS.thickness.min"
-            :max="PROP_LIMITS.thickness.max"
-            aria-label="Thickness, cm"
-            @change="commitProp('thickness', $event)"
-            @keydown.enter="blurOnEnter"
-          />
-          <span class="text-text-muted">cm</span>
-        </dd>
-      </div>
-      <div class="flex items-center justify-between">
-        <dt class="text-text-muted">Height</dt>
-        <dd class="flex items-center gap-1.5">
-          <input
-            type="number"
-            class="h-7 w-20 rounded-md border border-border bg-surface px-2 text-right text-sm text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
-            :value="wall.height"
-            :min="PROP_LIMITS.height.min"
-            :max="PROP_LIMITS.height.max"
-            aria-label="Height, cm"
-            @change="commitProp('height', $event)"
-            @keydown.enter="blurOnEnter"
-          />
-          <span class="text-text-muted">cm</span>
-        </dd>
-      </div>
-    </dl>
+      <dl class="flex flex-col gap-2 text-sm">
+        <div class="flex items-center justify-between">
+          <dt class="text-text-muted">Length</dt>
+          <dd>{{ wall.length }} cm</dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-text-muted">Thickness</dt>
+          <dd class="flex items-center gap-1.5">
+            <EditorNumberField
+              :value="wall.thickness"
+              :min="PROP_LIMITS.thickness.min"
+              :max="PROP_LIMITS.thickness.max"
+              label="Thickness, cm"
+              @commit="commitWallProp('thickness', $event)"
+            />
+            <span class="text-text-muted">cm</span>
+          </dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-text-muted">Height</dt>
+          <dd class="flex items-center gap-1.5">
+            <EditorNumberField
+              :value="wall.height"
+              :min="PROP_LIMITS.height.min"
+              :max="PROP_LIMITS.height.max"
+              label="Height, cm"
+              @commit="commitWallProp('height', $event)"
+            />
+            <span class="text-text-muted">cm</span>
+          </dd>
+        </div>
+      </dl>
+    </template>
+
+    <template v-else-if="node">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-text-muted">Vertex</h2>
+
+      <dl class="flex flex-col gap-2 text-sm">
+        <div class="flex items-center justify-between">
+          <dt class="text-text-muted">X</dt>
+          <dd class="flex items-center gap-1.5">
+            <EditorNumberField
+              :value="node.x"
+              :min="COORD_LIMIT.min"
+              :max="COORD_LIMIT.max"
+              label="X, cm"
+              @commit="commitNodeCoord('x', $event)"
+            />
+            <span class="text-text-muted">cm</span>
+          </dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-text-muted">Y</dt>
+          <dd class="flex items-center gap-1.5">
+            <EditorNumberField
+              :value="node.y"
+              :min="COORD_LIMIT.min"
+              :max="COORD_LIMIT.max"
+              label="Y, cm"
+              @commit="commitNodeCoord('y', $event)"
+            />
+            <span class="text-text-muted">cm</span>
+          </dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-text-muted">Walls</dt>
+          <dd>{{ node.wallCount }}</dd>
+        </div>
+      </dl>
+    </template>
   </aside>
 </template>

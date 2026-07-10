@@ -97,6 +97,18 @@ export function removeWall(doc: SceneDocument, id: string): void {
   }
 }
 
+/**
+ * True if placing nodes at the given positions would give some wall zero
+ * length. Used to refuse such moves (drag preview, inspector coordinate edits).
+ */
+export function collapsesAWall(doc: SceneDocument, moved: Record<NodeId, Vec2>): boolean {
+  return doc.walls.some((wall) => {
+    const a = moved[wall.a] ?? doc.nodes[wall.a]!.pos
+    const b = moved[wall.b] ?? doc.nodes[wall.b]!.pos
+    return a.x === b.x && a.y === b.y
+  })
+}
+
 /** Resolves a wall's node references to concrete points for rendering / hit-testing. */
 export function wallSegment(doc: SceneDocument, wall: Wall): { a: Vec2; b: Vec2 } {
   const a = doc.nodes[wall.a]
