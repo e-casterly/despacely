@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import Canvas2D from '@/features/editor/render2d/Canvas2D.vue'
+import EditorInspector from '@/features/editor/ui/EditorInspector.vue'
 import EditorSidebar from '@/features/editor/ui/EditorSidebar.vue'
 import { useEditorStore } from '@/features/editor/store/editorStore'
 import type { ToolId } from '@/features/editor/tools/types'
@@ -91,7 +92,7 @@ onBeforeUnmount(() => {
       <BaseButton variant="secondary" size="sm" @click="editor.open(projectId)">Retry</BaseButton>
     </div>
 
-    <div v-else class="flex flex-1 overflow-hidden">
+    <div v-else class="relative flex flex-1 overflow-hidden">
       <EditorSidebar
         :active-tool="activeTool"
         :can-undo="editor.canUndo"
@@ -101,6 +102,7 @@ onBeforeUnmount(() => {
         @redo="editor.redo"
       />
       <Canvas2D v-if="editor.doc" :active-tool="activeTool" />
+      <EditorInspector />
     </div>
   </div>
 </template>
