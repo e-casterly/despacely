@@ -58,6 +58,7 @@ export function render(
     drawWalls(ctx, ghost?.doc ?? viewDoc, palette, selectedWallId, ghost?.ghostId ?? null)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
+    if (view.overlay?.mergeTarget) drawMergeRing(ctx, vp, viewDoc, palette, view.overlay.mergeTarget)
   })
 }
 
@@ -235,6 +236,26 @@ function drawWallNodes(
     ctx.fill()
     ctx.stroke()
   }
+}
+
+/** Ring radius (screen px) marking the vertex a dragged vertex will weld into. */
+const MERGE_RING_PX = 9
+
+/** Drawn last so the ring sits above the dot pile-up at the weld point. */
+function drawMergeRing(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  doc: SceneDocument,
+  palette: CanvasPalette,
+  nodeId: NodeId,
+): void {
+  const node = doc.nodes[nodeId]
+  if (!node) return
+  ctx.strokeStyle = palette.accent
+  ctx.lineWidth = 2 / vp.zoom
+  ctx.beginPath()
+  ctx.arc(node.pos.x, node.pos.y, MERGE_RING_PX / vp.zoom, 0, Math.PI * 2)
+  ctx.stroke()
 }
 
 function drawItems(ctx: CanvasRenderingContext2D, vp: Viewport, doc: SceneDocument): void {

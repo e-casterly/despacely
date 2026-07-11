@@ -155,9 +155,17 @@ describe('selectTool node drag', () => {
     tool.onPointerDown!(at(199, 1), ctx)
     tool.onPointerMove!(at(299, 1), ctx) // within snapDist of (300, 0)
 
-    // preview snaps to the target's exact position, not the grid
-    expect(tool.preview).toEqual({ movedNodes: { [dragged]: { x: 300, y: 0 } } })
+    // preview snaps to the target's exact position and highlights it
+    expect(tool.preview).toEqual({
+      movedNodes: { [dragged]: { x: 300, y: 0 } },
+      mergeTarget: target,
+    })
 
+    // out of reach: back to plain grid dragging, highlight gone
+    tool.onPointerMove!(at(249, 1), ctx)
+    expect(tool.preview).toEqual({ movedNodes: { [dragged]: { x: 250, y: 0 } } })
+
+    tool.onPointerMove!(at(299, 1), ctx)
     tool.onPointerUp!(at(299, 1), ctx)
 
     expect(apply).toHaveBeenCalledTimes(1)

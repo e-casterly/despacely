@@ -64,8 +64,11 @@ export function createSelectTool(): Tool {
 
     get preview(): ToolOverlay | null {
       if (!drag) return null
+      const overlay: ToolOverlay = {}
       const moved = draggedNodes(drag)
-      return Object.keys(moved).length > 0 ? { movedNodes: moved } : null
+      if (Object.keys(moved).length > 0) overlay.movedNodes = moved
+      if (drag.kind === 'node' && drag.mergeInto) overlay.mergeTarget = drag.mergeInto
+      return Object.keys(overlay).length > 0 ? overlay : null
     },
 
     onPointerDown(input: PointerInput, ctx: ToolContext) {

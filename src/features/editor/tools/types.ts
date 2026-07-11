@@ -27,6 +27,8 @@ export interface ToolOverlay {
   ghostWall?: { a: Vec2; b: Vec2 }
   /** Drag preview: render these nodes (and walls on them) at overridden positions. */
   movedNodes?: Record<NodeId, Vec2>
+  /** Ring on the vertex the dragged vertex will weld into when dropped. */
+  mergeTarget?: NodeId
 }
 
 /**
