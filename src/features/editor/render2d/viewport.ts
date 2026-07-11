@@ -41,6 +41,17 @@ export function panBy(vp: Viewport, delta: Vec2): void {
   vp.pan = { x: vp.pan.x - delta.x / vp.zoom, y: vp.pan.y - delta.y / vp.zoom }
 }
 
+/** Centers the given world bounds and zooms so they fit with a screen-px margin. */
+export function zoomToFit(vp: Viewport, bounds: { min: Vec2; max: Vec2 }, padding = 40): void {
+  // a canvas smaller than the padding leaves no room; treat it as 1px and let the clamp decide
+  const fit = Math.min(
+    Math.max(1, vp.width - 2 * padding) / (bounds.max.x - bounds.min.x),
+    Math.max(1, vp.height - 2 * padding) / (bounds.max.y - bounds.min.y),
+  )
+  vp.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, fit))
+  vp.pan = { x: (bounds.min.x + bounds.max.x) / 2, y: (bounds.min.y + bounds.max.y) / 2 }
+}
+
 /** Zooms by factor, keeping the world point under the given screen point fixed. */
 export function zoomAt(vp: Viewport, screenPoint: Vec2, factor: number): void {
   const anchor = screenToWorld(vp, screenPoint)

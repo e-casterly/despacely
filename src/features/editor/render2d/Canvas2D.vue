@@ -2,7 +2,8 @@
 import { onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useEditorStore } from '../store/editorStore'
 import { render, type CanvasPalette } from './draw'
-import { createViewport, panBy, screenToWorld, zoomAt } from './viewport'
+import { createViewport, panBy, screenToWorld, zoomAt, zoomToFit } from './viewport'
+import { docBounds } from '../domain/operations'
 import type { Vec2 } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolId } from '../tools/types'
 import { createWallTool } from '../tools/wallTool'
@@ -17,6 +18,9 @@ const canvas = useTemplateRef('canvas')
 
 const viewport = createViewport()
 const spaceHeld = ref(false)
+// reactive mirror of viewport.zoom (the viewport itself is deliberately non-reactive);
+// re-synced at every point where the zoom changes
+const zoomLevel = ref(viewport.zoom)
 
 const tools: Partial<Record<ToolId, Tool>> = {
   select: createSelectTool(),
@@ -103,6 +107,7 @@ function onWheel(event: WheelEvent) {
   if (event.ctrlKey || event.metaKey) {
     // trackpad pinch arrives as wheel with ctrlKey set
     zoomAt(viewport, pointerPosition(event), Math.exp(-event.deltaY * unit * 0.002))
+    zoomLevel.value = viewport.zoom
   } else {
     // Safari keeps shift+wheel vertical; Chrome/Firefox already remap it to deltaX
     const dx = event.shiftKey && event.deltaX === 0 ? event.deltaY : event.deltaX
@@ -158,6 +163,35 @@ function onPointerUp(event: PointerEvent) {
     requestRepaint()
   }
 }
+
+/** one +/- button click; two clicks double the zoom */
+const BUTTON_ZOOM = Math.SQRT2
+
+function zoomStep(factor: number) {
+  zoomAt(viewport, { x: viewport.width / 2, y: viewport.height / 2 }, factor)
+  zoomLevel.value = viewport.zoom
+  requestRepaint()
+}
+
+function fitContent() {
+  const bounds = editor.doc ? docBounds(editor.doc) : null
+  if (bounds) {
+    zoomToFit(viewport, bounds)
+  } else {
+    // empty scene: back to the origin at default scale
+    viewport.pan = { x: 0, y: 0 }
+    viewport.zoom = 1
+  }
+  zoomLevel.value = viewport.zoom
+  requestRepaint()
+}
+
+defineExpose({
+  zoomLevel,
+  zoomIn: () => zoomStep(BUTTON_ZOOM),
+  zoomOut: () => zoomStep(1 / BUTTON_ZOOM),
+  zoomToFit: fitContent,
+})
 
 function onKeyDown(event: KeyboardEvent) {
   if (event.code === 'Space' && !event.repeat) spaceHeld.value = true

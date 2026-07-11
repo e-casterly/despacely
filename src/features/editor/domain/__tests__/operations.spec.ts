@@ -6,6 +6,7 @@ import {
   addWallBetween,
   collapsesAWall,
   createEmptyDocument,
+  docBounds,
   findItem,
   moveItem,
   moveNode,
@@ -173,6 +174,43 @@ describe('queries', () => {
 
     expect(wallsAtNode(doc, corner)).toHaveLength(2)
     expect(wallsAtNode(doc, a)).toHaveLength(1)
+  })
+})
+
+describe('docBounds', () => {
+  it('returns null for an empty scene', () => {
+    expect(docBounds(createEmptyDocument())).toBeNull()
+  })
+
+  it('grows wall ends by half the thickness', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    addWall(doc, a, b, { thickness: 10 })
+
+    expect(docBounds(doc)).toEqual({ min: { x: -5, y: -5 }, max: { x: 105, y: 5 } })
+  })
+
+  it('accounts for item rotation', () => {
+    const doc = createEmptyDocument()
+    addItem(doc, { ...makeItem(), size: { x: 60, y: 20 }, rotation: Math.PI / 2 })
+
+    // a 60x20 box at (50, 50) turned 90° spans 20x60
+    const bounds = docBounds(doc)!
+    expect(bounds.min.x).toBeCloseTo(40)
+    expect(bounds.min.y).toBeCloseTo(20)
+    expect(bounds.max.x).toBeCloseTo(60)
+    expect(bounds.max.y).toBeCloseTo(80)
+  })
+
+  it('unions walls and items', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    addWall(doc, a, b, { thickness: 10 })
+    addItem(doc, { ...makeItem(), pos: { x: 200, y: 200 }, size: { x: 40, y: 40 } })
+
+    expect(docBounds(doc)).toEqual({ min: { x: -5, y: -5 }, max: { x: 220, y: 220 } })
   })
 })
 

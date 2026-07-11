@@ -109,6 +109,41 @@ export function collapsesAWall(doc: SceneDocument, moved: Record<NodeId, Vec2>):
   })
 }
 
+export interface Bounds {
+  min: Vec2
+  max: Vec2
+}
+
+/**
+ * World-space bbox of everything drawn, or null for an empty scene. Wall ends
+ * grow by half the thickness on both axes — an over-cover for slanted walls,
+ * which is fine for framing. Orphan-node GC guarantees walls reach every node.
+ */
+export function docBounds(doc: SceneDocument): Bounds | null {
+  let min = { x: Infinity, y: Infinity }
+  let max = { x: -Infinity, y: -Infinity }
+  function include(p: Vec2, ex: number, ey: number) {
+    min = { x: Math.min(min.x, p.x - ex), y: Math.min(min.y, p.y - ey) }
+    max = { x: Math.max(max.x, p.x + ex), y: Math.max(max.y, p.y + ey) }
+  }
+  for (const wall of doc.walls) {
+    const { a, b } = wallSegment(doc, wall)
+    const half = wall.thickness / 2
+    include(a, half, half)
+    include(b, half, half)
+  }
+  for (const item of doc.items) {
+    const cos = Math.abs(Math.cos(item.rotation))
+    const sin = Math.abs(Math.sin(item.rotation))
+    include(
+      item.pos,
+      (cos * item.size.x + sin * item.size.y) / 2,
+      (sin * item.size.x + cos * item.size.y) / 2,
+    )
+  }
+  return min.x === Infinity ? null : { min, max }
+}
+
 /** Resolves a wall's node references to concrete points for rendering / hit-testing. */
 export function wallSegment(doc: SceneDocument, wall: Wall): { a: Vec2; b: Vec2 } {
   const a = doc.nodes[wall.a]

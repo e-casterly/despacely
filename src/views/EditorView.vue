@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import Canvas2D from '@/features/editor/render2d/Canvas2D.vue'
 import EditorInspector from '@/features/editor/ui/EditorInspector.vue'
 import EditorSidebar from '@/features/editor/ui/EditorSidebar.vue'
+import EditorZoomControls from '@/features/editor/ui/EditorZoomControls.vue'
 import { useEditorStore } from '@/features/editor/store/editorStore'
 import type { ToolId } from '@/features/editor/tools/types'
 import { useProjectStore } from '@/features/projects/projectStore'
@@ -14,6 +15,7 @@ const editor = useEditorStore()
 const projects = useProjectStore()
 
 const activeTool = ref<ToolId>('select')
+const canvas = useTemplateRef<InstanceType<typeof Canvas2D>>('canvas')
 
 const projectId = computed(() => route.params.id as string)
 const project = computed(() => projects.projects.find((p) => p.id === projectId.value))
@@ -101,8 +103,15 @@ onBeforeUnmount(() => {
         @undo="editor.undo"
         @redo="editor.redo"
       />
-      <Canvas2D v-if="editor.doc" :active-tool="activeTool" />
+      <Canvas2D v-if="editor.doc" ref="canvas" :active-tool="activeTool" />
       <EditorInspector />
+      <EditorZoomControls
+        v-if="editor.doc"
+        :zoom="canvas?.zoomLevel ?? 1"
+        @zoom-in="canvas?.zoomIn()"
+        @zoom-out="canvas?.zoomOut()"
+        @fit="canvas?.zoomToFit()"
+      />
     </div>
   </div>
 </template>

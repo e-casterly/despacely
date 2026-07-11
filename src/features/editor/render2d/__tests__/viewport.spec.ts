@@ -7,6 +7,7 @@ import {
   screenToWorld,
   worldToScreen,
   zoomAt,
+  zoomToFit,
 } from '../viewport'
 
 function makeViewport() {
@@ -48,6 +49,28 @@ describe('panBy', () => {
     const after = worldToScreen(vp, { x: 0, y: 0 })
     expect(after.x - before.x).toBeCloseTo(30)
     expect(after.y - before.y).toBeCloseTo(-10)
+  })
+})
+
+describe('zoomToFit', () => {
+  it('centers the bounds and fits the tighter axis with padding', () => {
+    const vp = makeViewport() // 800x600, pan/zoom will be overwritten
+    zoomToFit(vp, { min: { x: 100, y: 200 }, max: { x: 500, y: 300 } }, 40)
+
+    // available 720x520 for a 400x100 box -> the x axis governs: zoom 1.8
+    expect(vp.zoom).toBeCloseTo(1.8)
+    expect(worldToScreen(vp, { x: 300, y: 250 })).toEqual({ x: 400, y: 300 })
+    // left edge lands exactly on the padding line
+    expect(worldToScreen(vp, { x: 100, y: 200 }).x).toBeCloseTo(40)
+  })
+
+  it('clamps the zoom for tiny and huge content', () => {
+    const vp = makeViewport()
+    zoomToFit(vp, { min: { x: 0, y: 0 }, max: { x: 1, y: 1 } })
+    expect(vp.zoom).toBe(MAX_ZOOM)
+
+    zoomToFit(vp, { min: { x: 0, y: 0 }, max: { x: 1e6, y: 1e6 } })
+    expect(vp.zoom).toBe(MIN_ZOOM)
   })
 })
 
