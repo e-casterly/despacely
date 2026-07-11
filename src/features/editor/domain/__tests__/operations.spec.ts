@@ -8,9 +8,11 @@ import {
   createEmptyDocument,
   docBounds,
   findItem,
+  mergeNodes,
   moveItem,
   moveNode,
   nodeAt,
+  nodesConnected,
   removeItem,
   removeWall,
   wallSegment,
@@ -164,6 +166,26 @@ describe('queries', () => {
     expect(nodeAt(doc, { x: 130, y: 0 }, 5)).toBeUndefined()
   })
 
+  it('nodeAt skips the excluded node', () => {
+    const doc = createEmptyDocument()
+    const self = addNode(doc, { x: 0, y: 0 })
+    const other = addNode(doc, { x: 3, y: 0 })
+
+    expect(nodeAt(doc, { x: 0, y: 0 }, 5, self)?.id).toBe(other)
+  })
+
+  it('nodesConnected sees a direct wall in either orientation', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 200, y: 0 })
+    addWall(doc, a, b)
+
+    expect(nodesConnected(doc, a, b)).toBe(true)
+    expect(nodesConnected(doc, b, a)).toBe(true)
+    expect(nodesConnected(doc, a, c)).toBe(false)
+  })
+
   it('wallsAtNode returns incident walls', () => {
     const doc = createEmptyDocument()
     const a = addNode(doc, { x: 0, y: 0 })
@@ -174,6 +196,43 @@ describe('queries', () => {
 
     expect(wallsAtNode(doc, corner)).toHaveLength(2)
     expect(wallsAtNode(doc, a)).toHaveLength(1)
+  })
+})
+
+describe('mergeNodes', () => {
+  it('rewires walls at the source to the target and deletes the source', () => {
+    // two separate walls; the endpoint of one welds onto an endpoint of the other
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 100, y: 100 })
+    const d = addNode(doc, { x: 200, y: 100 })
+    const wall = addWall(doc, a, b)
+    addWall(doc, c, d)
+
+    const report = mergeNodes(doc, b, c)
+
+    expect(doc.nodes[b]).toBeUndefined()
+    expect(wall.b).toBe(c)
+    expect(doc.walls).toHaveLength(2)
+    expect(wallsAtNode(doc, c)).toHaveLength(2)
+    expect(report).toEqual({ rewired: [{ wallId: wall.id, end: 'b' }], removedWalls: [] })
+  })
+
+  it('drops a wall that the merge turns into a duplicate', () => {
+    // chain a-b-c folded shut: a-b rewired to c-b duplicates b-c
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 200, y: 0 })
+    const folded = addWall(doc, a, b)
+    const kept = addWall(doc, b, c)
+
+    const report = mergeNodes(doc, a, c)
+
+    expect(doc.walls).toEqual([kept])
+    expect(report.removedWalls).toEqual([folded])
+    expect(doc.nodes[a]).toBeUndefined()
   })
 })
 

@@ -2,11 +2,13 @@ import {
   addItem,
   addWallBetween,
   findWall,
+  mergeNodes,
   moveItem,
   moveNode,
   removeItem,
   removeWall,
   wallsAtNode,
+  type MergeReport,
   type WallOptions,
 } from './operations'
 import type { Item, Node, NodeId, SceneDocument, Vec2, Wall } from './types'
@@ -130,6 +132,41 @@ export class RemoveNodeCommand implements Command {
   undo(doc: SceneDocument): void {
     for (const node of this.removedNodes) doc.nodes[node.id] = node
     doc.walls.push(...this.removedWalls)
+  }
+}
+
+/**
+ * Welds a dragged vertex into a stationary target: walls at the source are
+ * rewired to the target, walls that become duplicates are dropped, the source
+ * vertex disappears. The two vertices must not share a wall — it would
+ * collapse to zero length (the select tool guards against that).
+ */
+export class MergeNodesCommand implements Command {
+  readonly label = 'Merge vertices'
+  private sourceNode?: Node
+  private report: MergeReport = { rewired: [], removedWalls: [] }
+
+  constructor(
+    private readonly sourceId: NodeId,
+    private readonly targetId: NodeId,
+  ) {}
+
+  do(doc: SceneDocument): void {
+    const source = doc.nodes[this.sourceId]
+    if (!source || !doc.nodes[this.targetId]) return
+    this.sourceNode = source
+    this.report = mergeNodes(doc, this.sourceId, this.targetId)
+  }
+
+  undo(doc: SceneDocument): void {
+    if (!this.sourceNode) return
+    doc.nodes[this.sourceNode.id] = this.sourceNode
+    // dropped duplicates return first so the rewiring below reaches them too
+    doc.walls.push(...this.report.removedWalls)
+    for (const { wallId, end } of this.report.rewired) {
+      const wall = findWall(doc, wallId)
+      if (wall) wall[end] = this.sourceId
+    }
   }
 }
 

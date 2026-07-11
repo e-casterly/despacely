@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   AddItemCommand,
   AddWallCommand,
+  MergeNodesCommand,
   MoveItemCommand,
   MoveNodeCommand,
   MoveWallCommand,
@@ -171,6 +172,51 @@ describe('RemoveNodeCommand', () => {
     cmd.undo(doc)
     expect(doc.walls).toHaveLength(3)
     expect(Object.keys(doc.nodes)).toHaveLength(4)
+  })
+})
+
+describe('MergeNodesCommand', () => {
+  it('welds two separate walls into a junction and takes it apart on undo', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 100, y: 100 })
+    const d = addNode(doc, { x: 200, y: 100 })
+    const wall = addWall(doc, a, b)
+    addWall(doc, c, d)
+
+    const cmd = new MergeNodesCommand(b, c)
+    cmd.do(doc)
+    expect(Object.keys(doc.nodes)).toHaveLength(3)
+    expect(wall.b).toBe(c)
+
+    cmd.undo(doc)
+    expect(Object.keys(doc.nodes)).toHaveLength(4)
+    expect(doc.nodes[b]!.pos).toEqual({ x: 100, y: 0 })
+    expect(wall.b).toBe(b)
+  })
+
+  it('restores a dropped duplicate with its original endpoints on undo', () => {
+    // chain a-b-c folded shut: wall a-b becomes a duplicate of b-c and is dropped
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 200, y: 0 })
+    const folded = addWall(doc, a, b)
+    addWall(doc, b, c)
+
+    const cmd = new MergeNodesCommand(a, c)
+    cmd.do(doc)
+    expect(doc.walls).toHaveLength(1)
+
+    cmd.undo(doc)
+    expect(doc.walls).toHaveLength(2)
+    expect(folded.a).toBe(a) // not left pointing at the merge target
+    expect(folded.b).toBe(b)
+
+    cmd.do(doc) // redo arrives at the same result
+    expect(doc.walls).toHaveLength(1)
+    expect(doc.nodes[a]).toBeUndefined()
   })
 })
 

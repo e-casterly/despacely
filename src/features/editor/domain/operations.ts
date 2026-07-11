@@ -22,11 +22,12 @@ export function findNode(doc: SceneDocument, id: NodeId): Node | undefined {
   return doc.nodes[id]
 }
 
-/** Nearest existing node within maxDist (cm), or undefined. */
-export function nodeAt(doc: SceneDocument, pos: Vec2, maxDist: number): Node | undefined {
+/** Nearest existing node within maxDist (cm), or undefined; `except` is skipped. */
+export function nodeAt(doc: SceneDocument, pos: Vec2, maxDist: number, except?: NodeId): Node | undefined {
   let best: Node | undefined
   let bestDist = maxDist
   for (const node of Object.values(doc.nodes)) {
+    if (node.id === except) continue
     const dist = Math.hypot(node.pos.x - pos.x, node.pos.y - pos.y)
     if (dist <= bestDist) {
       best = node
@@ -34,6 +35,11 @@ export function nodeAt(doc: SceneDocument, pos: Vec2, maxDist: number): Node | u
     }
   }
   return best
+}
+
+/** True when some wall connects the two nodes directly. */
+export function nodesConnected(doc: SceneDocument, a: NodeId, b: NodeId): boolean {
+  return doc.walls.some((wall) => (wall.a === a && wall.b === b) || (wall.a === b && wall.b === a))
 }
 
 export function moveNode(doc: SceneDocument, id: NodeId, pos: Vec2): void {
@@ -107,6 +113,46 @@ export function collapsesAWall(doc: SceneDocument, moved: Record<NodeId, Vec2>):
     const b = moved[wall.b] ?? doc.nodes[wall.b]!.pos
     return a.x === b.x && a.y === b.y
   })
+}
+
+/** What mergeNodes changed — enough for a command to undo it. */
+export interface MergeReport {
+  /** wall endpoints that were rewired from the source to the target */
+  rewired: { wallId: string; end: 'a' | 'b' }[]
+  /** walls dropped because rewiring made them span the same pair as another wall */
+  removedWalls: Wall[]
+}
+
+/**
+ * Welds `source` into `target`: every wall at the source is rewired to the
+ * target, rewired walls that now duplicate another wall are dropped, and the
+ * source node is deleted. The two nodes must not share a wall — it would
+ * collapse to zero length (callers guard against that).
+ */
+export function mergeNodes(doc: SceneDocument, sourceId: NodeId, targetId: NodeId): MergeReport {
+  const rewired: MergeReport['rewired'] = []
+  for (const wall of doc.walls) {
+    if (wall.a === sourceId) {
+      wall.a = targetId
+      rewired.push({ wallId: wall.id, end: 'a' })
+    }
+    if (wall.b === sourceId) {
+      wall.b = targetId
+      rewired.push({ wallId: wall.id, end: 'b' })
+    }
+  }
+  const pair = (wall: Wall) => (wall.a < wall.b ? `${wall.a}:${wall.b}` : `${wall.b}:${wall.a}`)
+  const removedWalls: Wall[] = []
+  for (const { wallId } of rewired) {
+    const wall = findWall(doc, wallId)
+    if (!wall) continue // already dropped as a duplicate
+    if (doc.walls.some((other) => other !== wall && pair(other) === pair(wall))) {
+      doc.walls = doc.walls.filter((w) => w !== wall)
+      removedWalls.push(wall)
+    }
+  }
+  delete doc.nodes[sourceId]
+  return { rewired, removedWalls }
 }
 
 export interface Bounds {

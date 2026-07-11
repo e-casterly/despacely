@@ -142,6 +142,50 @@ describe('selectTool node drag', () => {
     expect(apply).not.toHaveBeenCalled()
   })
 
+  it('dropping a vertex near a foreign vertex merges them', () => {
+    // second, unconnected wall; its near end is the merge target
+    const { doc } = docWithWall()
+    const { ctx, select, apply } = ctxFor(doc)
+    const dragged = nodeIds(doc)[1]! // (200, 0)
+    const target = addNode(doc, { x: 300, y: 0 })
+    const far = addNode(doc, { x: 300, y: 100 })
+    addWall(doc, target, far)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(199, 1), ctx)
+    tool.onPointerMove!(at(299, 1), ctx) // within snapDist of (300, 0)
+
+    // preview snaps to the target's exact position, not the grid
+    expect(tool.preview).toEqual({ movedNodes: { [dragged]: { x: 300, y: 0 } } })
+
+    tool.onPointerUp!(at(299, 1), ctx)
+
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(select).toHaveBeenLastCalledWith({ kind: 'node', id: target })
+    const command = apply.mock.calls[0]![0]
+    command.do(doc)
+    expect(doc.nodes[dragged]).toBeUndefined()
+    expect(Object.keys(doc.nodes)).toHaveLength(3)
+    command.undo(doc)
+    expect(doc.nodes[dragged]!.pos).toEqual({ x: 200, y: 0 })
+  })
+
+  it('does not merge into a vertex sharing a wall, even off the grid', () => {
+    // (200, 0) is the dragged vertex's direct neighbour: snapping onto it must
+    // fall back to the grid + collapse guard instead of turning into a merge
+    const { doc } = docWithWall()
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(1, -2), ctx)
+    tool.onPointerMove!(at(198, 2), ctx) // in reach of the neighbour, off-grid
+
+    expect(tool.preview).toBeNull() // no merge preview, move refused
+
+    tool.onPointerUp!(at(198, 2), ctx)
+    expect(apply).not.toHaveBeenCalled()
+  })
+
   it('cancel drops the drag without applying', () => {
     const { doc } = docWithWall()
     const { ctx, apply } = ctxFor(doc)

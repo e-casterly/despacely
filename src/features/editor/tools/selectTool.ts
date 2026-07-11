@@ -1,6 +1,6 @@
-import { MoveNodeCommand, MoveWallCommand } from '../domain/commands'
+import { MergeNodesCommand, MoveNodeCommand, MoveWallCommand } from '../domain/commands'
 import { distToSegment } from '../domain/geometry'
-import { collapsesAWall, nodeAt, wallSegment } from '../domain/operations'
+import { collapsesAWall, nodeAt, nodesConnected, wallSegment } from '../domain/operations'
 import { snap } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolOverlay } from './types'
@@ -33,7 +33,7 @@ function samePoint(a: Vec2, b: Vec2): boolean {
 }
 
 type Drag =
-  | { kind: 'node'; nodeId: NodeId; from: Vec2; to: Vec2 }
+  | { kind: 'node'; nodeId: NodeId; from: Vec2; to: Vec2; mergeInto: NodeId | null }
   | { kind: 'wall'; grab: Vec2; ends: { nodeId: NodeId; from: Vec2 }[]; delta: Vec2 }
 
 /** The dragged nodes at their preview positions (empty when nothing moved yet). */
@@ -73,7 +73,7 @@ export function createSelectTool(): Tool {
       const node = nodeAt(ctx.doc, input.world, ctx.snapDist)
       if (node) {
         ctx.select({ kind: 'node', id: node.id })
-        drag = { kind: 'node', nodeId: node.id, from: node.pos, to: node.pos }
+        drag = { kind: 'node', nodeId: node.id, from: node.pos, to: node.pos, mergeInto: null }
         return
       }
       const wall = pickWall(ctx.doc, input.world, ctx.snapDist)
@@ -91,6 +91,20 @@ export function createSelectTool(): Tool {
     onPointerMove(input: PointerInput, ctx: ToolContext) {
       if (!drag) return
       if (drag.kind === 'node') {
+        // a foreign vertex in reach beats the grid: dropping there welds the two.
+        // Direct neighbours are skipped (merging collapses the shared wall), and
+        // the collapse check covers a neighbour coinciding with the target.
+        const target = nodeAt(ctx.doc, input.world, ctx.snapDist, drag.nodeId)
+        if (
+          target &&
+          !nodesConnected(ctx.doc, drag.nodeId, target.id) &&
+          !collapsesAWall(ctx.doc, { [drag.nodeId]: target.pos })
+        ) {
+          drag.to = target.pos
+          drag.mergeInto = target.id
+          return
+        }
+        drag.mergeInto = null
         const to = snapPoint(input.world)
         // refuse positions that would collapse a wall to zero length
         if (!collapsesAWall(ctx.doc, { [drag.nodeId]: to })) drag.to = to
@@ -108,7 +122,11 @@ export function createSelectTool(): Tool {
     onPointerUp(_input: PointerInput, ctx: ToolContext) {
       if (!drag) return
       if (drag.kind === 'node') {
-        if (!samePoint(drag.from, drag.to)) {
+        if (drag.mergeInto) {
+          ctx.apply(new MergeNodesCommand(drag.nodeId, drag.mergeInto))
+          // the dragged vertex is gone; keep the selection on the survivor
+          ctx.select({ kind: 'node', id: drag.mergeInto })
+        } else if (!samePoint(drag.from, drag.to)) {
           ctx.apply(new MoveNodeCommand(drag.nodeId, drag.from, drag.to))
         }
       } else if (drag.delta.x !== 0 || drag.delta.y !== 0) {
