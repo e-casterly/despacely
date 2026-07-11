@@ -98,7 +98,17 @@ function pointerPosition(event: PointerEvent | WheelEvent): Vec2 {
 }
 
 function onWheel(event: WheelEvent) {
-  zoomAt(viewport, pointerPosition(event), Math.exp(-event.deltaY * 0.002))
+  // Firefox reports mouse-wheel deltas in lines, not pixels
+  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1
+  if (event.ctrlKey || event.metaKey) {
+    // trackpad pinch arrives as wheel with ctrlKey set
+    zoomAt(viewport, pointerPosition(event), Math.exp(-event.deltaY * unit * 0.002))
+  } else {
+    // Safari keeps shift+wheel vertical; Chrome/Firefox already remap it to deltaX
+    const dx = event.shiftKey && event.deltaX === 0 ? event.deltaY : event.deltaX
+    const dy = event.shiftKey && event.deltaX === 0 ? 0 : event.deltaY
+    panBy(viewport, { x: -dx * unit, y: -dy * unit })
+  }
   requestRepaint()
 }
 
