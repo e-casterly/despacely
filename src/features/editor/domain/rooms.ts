@@ -1,3 +1,4 @@
+import { pointInPolygon } from './geometry'
 import type { NodeId, SceneDocument, Vec2 } from './types'
 
 /**
@@ -56,6 +57,24 @@ export function detectRooms(doc: SceneDocument): Room[] {
     }
   }
   return rooms.sort((a, b) => b.area - a.area)
+}
+
+/**
+ * Stable identity for a derived room: its contour node ids, sorted. Survives
+ * re-detection and node moves and only changes when the topology does, which
+ * is what lets a selection reference a room that is never stored.
+ */
+export function roomKey(room: Room): string {
+  return [...room.nodeIds].sort().join('|')
+}
+
+/** The innermost (smallest) room containing the point, or undefined. */
+export function roomAt(doc: SceneDocument, pos: Vec2): Room | undefined {
+  const rooms = detectRooms(doc) // largest first, so scan from the back
+  for (let i = rooms.length - 1; i >= 0; i--) {
+    if (pointInPolygon(pos, rooms[i]!.polygon)) return rooms[i]
+  }
+  return undefined
 }
 
 /**

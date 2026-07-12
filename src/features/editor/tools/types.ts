@@ -10,8 +10,12 @@ export interface PointerInput {
   shift: boolean
 }
 
-/** What is currently selected in the editor (extends to items later). */
-export type Selection = { kind: 'wall'; id: string } | { kind: 'node'; id: NodeId }
+/** What is currently selected in the editor (extends to items later).
+ * A room is derived, not stored, so its id is the roomKey of its contour. */
+export type Selection =
+  | { kind: 'wall'; id: string }
+  | { kind: 'node'; id: NodeId }
+  | { kind: 'room'; id: string }
 
 /** Everything a tool needs to read the scene and commit edits. */
 export interface ToolContext {

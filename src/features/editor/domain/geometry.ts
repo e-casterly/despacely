@@ -11,6 +11,18 @@ export function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby))
 }
 
+/** Whether a point lies inside a simple polygon (ray casting); used for room hit-testing. */
+export function pointInPolygon(p: Vec2, polygon: Vec2[]): boolean {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i]!
+    const b = polygon[j]!
+    const crosses = a.y > p.y !== b.y > p.y
+    if (crosses && p.x < a.x + ((p.y - a.y) * (b.x - a.x)) / (b.y - a.y)) inside = !inside
+  }
+  return inside
+}
+
 /** Whether a point lies inside a rectangle rotated around its center; used for item hit-testing. */
 export function pointInRotatedRect(p: Vec2, center: Vec2, size: Vec2, rotation: number): boolean {
   const dx = p.x - center.x

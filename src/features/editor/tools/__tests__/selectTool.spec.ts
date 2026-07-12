@@ -78,6 +78,52 @@ describe('selectTool', () => {
   })
 })
 
+describe('selectTool rooms', () => {
+  function docWithRoom(): { doc: SceneDocument; key: string } {
+    const doc = createEmptyDocument()
+    const corners = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 200 },
+      { x: 0, y: 200 },
+    ]
+    const ids = corners.map((p) => addNode(doc, p))
+    for (let i = 0; i < ids.length; i++) addWall(doc, ids[i]!, ids[(i + 1) % ids.length]!)
+    return { doc, key: [...ids].sort().join('|') }
+  }
+
+  it('selects the room when the click hits neither a vertex nor a wall', () => {
+    const { doc, key } = docWithRoom()
+    const { ctx, select } = ctxFor(doc)
+
+    createSelectTool().onPointerDown!(at(100, 100), ctx)
+
+    expect(select).toHaveBeenCalledWith({ kind: 'room', id: key })
+  })
+
+  it('still prefers a wall over the room around it', () => {
+    const { doc } = docWithRoom()
+    const { ctx, select } = ctxFor(doc)
+
+    createSelectTool().onPointerDown!(at(100, 8), ctx) // inside the room, within wall slop
+
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ kind: 'wall' }))
+  })
+
+  it('does not start a drag from a room click', () => {
+    const { doc } = docWithRoom()
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 100), ctx)
+    tool.onPointerMove!(at(150, 150), ctx)
+    expect(tool.preview).toBeNull()
+    tool.onPointerUp!(at(150, 150), ctx)
+
+    expect(apply).not.toHaveBeenCalled()
+  })
+})
+
 describe('selectTool node drag', () => {
   function nodeIds(doc: SceneDocument): string[] {
     return Object.keys(doc.nodes)

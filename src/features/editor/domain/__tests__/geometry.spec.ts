@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { distToSegment, pointInRotatedRect } from '../geometry'
+import { distToSegment, pointInPolygon, pointInRotatedRect } from '../geometry'
 
 describe('distToSegment', () => {
   const a = { x: 0, y: 0 }
@@ -20,6 +20,34 @@ describe('distToSegment', () => {
 
   it('handles a zero-length segment as a point', () => {
     expect(distToSegment({ x: 3, y: 4 }, a, a)).toBe(5)
+  })
+})
+
+describe('pointInPolygon', () => {
+  const square = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 0, y: 100 },
+  ]
+
+  it('detects points inside and outside a square', () => {
+    expect(pointInPolygon({ x: 50, y: 50 }, square)).toBe(true)
+    expect(pointInPolygon({ x: 150, y: 50 }, square)).toBe(false)
+    expect(pointInPolygon({ x: -1, y: 50 }, square)).toBe(false)
+  })
+
+  it('excludes the notch of a concave (L-shaped) polygon', () => {
+    const lShape = [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 100 },
+      { x: 100, y: 100 },
+      { x: 100, y: 200 },
+      { x: 0, y: 200 },
+    ]
+    expect(pointInPolygon({ x: 50, y: 150 }, lShape)).toBe(true)
+    expect(pointInPolygon({ x: 150, y: 150 }, lShape)).toBe(false)
   })
 })
 

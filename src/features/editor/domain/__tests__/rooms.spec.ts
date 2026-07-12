@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { addNode, addWall, createEmptyDocument, removeWall } from '../operations'
-import { detectRooms } from '../rooms'
+import { detectRooms, roomAt, roomKey } from '../rooms'
 import type { NodeId, SceneDocument, Vec2 } from '../types'
 
 /** Adds nodes at the given points and walls closing them into a ring. */
@@ -149,6 +149,36 @@ describe('detectRooms', () => {
 
     // hole subtraction is deferred: the outer room's area includes the inner loop
     expect(rooms.map((room) => room.area)).toEqual([300 * 300, 100 * 100])
+  })
+
+  it('finds the room containing a point and nothing outside', () => {
+    const doc = createEmptyDocument()
+    const ids = ring(doc, square(0, 0, 100))
+
+    const hit = roomAt(doc, { x: 50, y: 50 })
+    expect(hit).toBeDefined()
+    expect([...hit!.nodeIds].sort()).toEqual([...ids].sort())
+    expect(roomAt(doc, { x: 250, y: 50 })).toBeUndefined()
+  })
+
+  it('resolves a point in a nested loop to the innermost room', () => {
+    const doc = createEmptyDocument()
+    ring(doc, square(0, 0, 300))
+    ring(doc, square(100, 100, 100))
+
+    expect(roomAt(doc, { x: 150, y: 150 })!.area).toBe(100 * 100)
+    expect(roomAt(doc, { x: 50, y: 50 })!.area).toBe(300 * 300)
+  })
+
+  it('keeps roomKey stable across re-detection and node moves', () => {
+    const doc = createEmptyDocument()
+    const ids = ring(doc, square(0, 0, 100))
+
+    const before = roomKey(detectRooms(doc)[0]!)
+    doc.nodes[ids[0]!]!.pos = { x: -50, y: -50 } // move a corner: same topology
+    const after = roomKey(detectRooms(doc)[0]!)
+
+    expect(after).toBe(before)
   })
 
   it('returns polygon points detached from the document nodes', () => {

@@ -1,6 +1,7 @@
 import { MergeNodesCommand, MoveNodeCommand, MoveWallCommand } from '../domain/commands'
 import { distToSegment } from '../domain/geometry'
 import { collapsesAWall, nodeAt, nodesConnected, wallSegment } from '../domain/operations'
+import { roomAt, roomKey } from '../domain/rooms'
 import { snap } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolOverlay } from './types'
@@ -80,15 +81,20 @@ export function createSelectTool(): Tool {
         return
       }
       const wall = pickWall(ctx.doc, input.world, ctx.snapDist)
-      ctx.select(wall ? { kind: 'wall', id: wall.id } : null)
       if (wall) {
+        ctx.select({ kind: 'wall', id: wall.id })
         drag = {
           kind: 'wall',
           grab: input.world,
           ends: [wall.a, wall.b].map((id) => ({ nodeId: id, from: ctx.doc.nodes[id]!.pos })),
           delta: { x: 0, y: 0 },
         }
+        return
       }
+      // nothing solid under the pointer: the room the click landed in, if any.
+      // Selection only — a room has no drag (its walls are dragged individually).
+      const room = roomAt(ctx.doc, input.world)
+      ctx.select(room ? { kind: 'room', id: roomKey(room) } : null)
     },
 
     onPointerMove(input: PointerInput, ctx: ToolContext) {

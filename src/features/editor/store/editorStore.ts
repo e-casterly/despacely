@@ -90,9 +90,11 @@ export const useEditorStore = defineStore('editor', () => {
     // a stale selection (entity already gone via undo) clears without a command
     if (target.kind === 'wall') {
       if (findWall(doc.value, target.id)) apply(new RemoveWallCommand(target.id))
-    } else if (findNode(doc.value, target.id)) {
-      apply(new RemoveNodeCommand(target.id))
+    } else if (target.kind === 'node') {
+      if (findNode(doc.value, target.id)) apply(new RemoveNodeCommand(target.id))
     }
+    // kind 'room' only clears: a room doesn't own its walls (they may bound a
+    // neighbour too), so what "delete room" removes is deliberately unresolved
   }
 
   function undo() {

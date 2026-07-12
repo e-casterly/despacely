@@ -1,5 +1,5 @@
 import { nodeAt } from '../domain/operations'
-import { detectRooms } from '../domain/rooms'
+import { detectRooms, roomKey } from '../domain/rooms'
 import { WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { Selection, ToolOverlay } from '../tools/types'
@@ -49,6 +49,7 @@ export function render(
 
   const selectedWallId = view.selection?.kind === 'wall' ? view.selection.id : null
   const selectedNodeId = view.selection?.kind === 'node' ? view.selection.id : null
+  const selectedRoomKey = view.selection?.kind === 'room' ? view.selection.id : null
   // The doc as the user currently sees it: a drag preview overrides node
   // positions on a render-only copy, so the real document stays untouched
   // until the move is committed as a command.
@@ -59,7 +60,7 @@ export function render(
   withWorldTransform(ctx, vp, dpr, () => {
     // rooms derive from viewDoc: a drag preview moves them live, while the
     // uncommitted ghost wall never closes one
-    drawRooms(ctx, viewDoc, palette)
+    drawRooms(ctx, viewDoc, palette, selectedRoomKey)
     drawWalls(ctx, ghost?.doc ?? viewDoc, palette, selectedWallId, ghost?.ghostId ?? null)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
@@ -156,14 +157,31 @@ function withWorldTransform(
   ctx.restore()
 }
 
+/** Selected-room fill: accent at low alpha, echoing the ghost wall's translucent accent. */
+const SELECTED_ROOM_ALPHA = 0.25
+
 /**
  * Fills every closed wall contour, largest first so a loop nested inside a
  * room stays visible on top. Recomputed per repaint like the wall miters —
  * both walk the same graph and neither is worth caching at this scene size.
  */
-function drawRooms(ctx: CanvasRenderingContext2D, doc: SceneDocument, palette: CanvasPalette): void {
-  ctx.fillStyle = palette.room
-  for (const room of detectRooms(doc)) fillPoly(ctx, room.polygon)
+function drawRooms(
+  ctx: CanvasRenderingContext2D,
+  doc: SceneDocument,
+  palette: CanvasPalette,
+  selectedKey: string | null,
+): void {
+  for (const room of detectRooms(doc)) {
+    if (selectedKey !== null && roomKey(room) === selectedKey) {
+      ctx.globalAlpha = SELECTED_ROOM_ALPHA
+      ctx.fillStyle = palette.accent
+      fillPoly(ctx, room.polygon)
+      ctx.globalAlpha = 1
+    } else {
+      ctx.fillStyle = palette.room
+      fillPoly(ctx, room.polygon)
+    }
+  }
 }
 
 /**
