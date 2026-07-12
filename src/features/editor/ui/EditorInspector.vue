@@ -2,7 +2,7 @@
 import BaseButton from '@/components/ui/BaseButton.vue'
 import { MoveNodeCommand, SetWallPropsCommand } from '../domain/commands'
 import { collapsesAWall, findNode, findWall, wallsAtNode, wallSegment } from '../domain/operations'
-import { detectRooms, roomKey } from '../domain/rooms'
+import { findRoom } from '../domain/rooms'
 import { squareCmToM2 } from '../domain/units'
 import { useEditorStore } from '../store/editorStore'
 import { useDocSnapshot } from '../store/useDocSnapshot'
@@ -48,8 +48,7 @@ const node = useDocSnapshot((doc) => {
 
 const room = useDocSnapshot((doc) => {
   if (editor.selection?.kind !== 'room') return null
-  const key = editor.selection.id
-  const found = detectRooms(doc).find((r) => roomKey(r) === key)
+  const found = findRoom(doc, editor.selection.id)
   if (!found) return null
   let perimeter = 0
   for (let i = 0; i < found.polygon.length; i++) {
@@ -178,14 +177,19 @@ function commitNodeCoord(axis: 'x' | 'y', next: number) {
     </template>
 
     <BaseButton
-      v-if="wall || node"
       variant="danger"
       size="sm"
       class="w-full"
-      :title="node ? 'Deletes the vertex and every wall meeting at it' : undefined"
+      :title="
+        node
+          ? 'Deletes the vertex and every wall meeting at it'
+          : room
+            ? 'Removes the room\'s walls; walls shared with a neighbouring room stay'
+            : undefined
+      "
       @click="editor.deleteSelection()"
     >
-      {{ wall ? 'Delete wall' : 'Delete vertex' }}
+      {{ wall ? 'Delete wall' : node ? 'Delete vertex' : 'Delete room' }}
     </BaseButton>
   </aside>
 </template>

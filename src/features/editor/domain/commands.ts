@@ -11,6 +11,7 @@ import {
   type MergeReport,
   type WallOptions,
 } from './operations'
+import { roomExclusiveWalls } from './rooms'
 import type { Item, Node, NodeId, SceneDocument, Vec2, Wall } from './types'
 
 /**
@@ -123,6 +124,35 @@ export class RemoveNodeCommand implements Command {
   do(doc: SceneDocument): void {
     const before = { ...doc.nodes }
     this.removedWalls = wallsAtNode(doc, this.nodeId)
+    for (const wall of this.removedWalls) removeWall(doc, wall.id)
+    this.removedNodes = Object.keys(before)
+      .filter((id) => !(id in doc.nodes))
+      .map((id) => before[id] as Node)
+  }
+
+  undo(doc: SceneDocument): void {
+    for (const node of this.removedNodes) doc.nodes[node.id] = node
+    doc.walls.push(...this.removedWalls)
+  }
+}
+
+/**
+ * Deletes a room by removing the contour walls it doesn't share with a
+ * neighbouring room (shared walls stay — the neighbour owns them too);
+ * endpoints left wall-less are GC'd. Undo restores the walls and nodes; redo
+ * recomputes them, which lands on the same set because detection is
+ * deterministic over the restored graph.
+ */
+export class RemoveRoomCommand implements Command {
+  readonly label = 'Delete room'
+  private removedWalls: Wall[] = []
+  private removedNodes: Node[] = []
+
+  constructor(private readonly roomId: string) {}
+
+  do(doc: SceneDocument): void {
+    const before = { ...doc.nodes }
+    this.removedWalls = roomExclusiveWalls(doc, this.roomId)
     for (const wall of this.removedWalls) removeWall(doc, wall.id)
     this.removedNodes = Object.keys(before)
       .filter((id) => !(id in doc.nodes))

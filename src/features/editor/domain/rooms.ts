@@ -1,5 +1,5 @@
 import { pointInPolygon } from './geometry'
-import type { NodeId, SceneDocument, Vec2 } from './types'
+import type { NodeId, SceneDocument, Vec2, Wall } from './types'
 
 /**
  * A closed contour in the wall graph. Rooms are derived from the graph on
@@ -12,7 +12,9 @@ export interface Room {
   nodeIds: NodeId[]
   /** the same contour as points — fresh copies, safe to hand outside the hot doc */
   polygon: Vec2[]
-  /** enclosed area measured along wall centerlines, cm² */
+  /** outer contours of detached loops nested inside: not part of this room's floor */
+  holes: Vec2[][]
+  /** floor area along wall centerlines with holes carved out, cm² */
   area: number
 }
 
@@ -45,17 +47,49 @@ export function detectRooms(doc: SceneDocument): Room[] {
     )
   }
 
+  const component = componentIds(neighbors)
+
   const used = new Set<string>() // directed edges already claimed by a face
   const rooms: Room[] = []
+  const gross = new Map<Room, number>() // contour area before holes, for parent picking
+  const roomComponent = new Map<Room, number>()
+  const outerContours: { component: number; polygon: Vec2[]; area: number }[] = []
   for (const [from, around] of ordered) {
     for (const to of around) {
       if (used.has(`${from}:${to}`)) continue
       const nodeIds = walkFace(ordered, used, from, to)
       const polygon = nodeIds.map((id) => ({ ...doc.nodes[id]!.pos }))
       const area = shoelaceArea(polygon)
-      if (area > MIN_ROOM_AREA) rooms.push({ nodeIds, polygon, area })
+      if (area > MIN_ROOM_AREA) {
+        const room: Room = { nodeIds, polygon, holes: [], area }
+        rooms.push(room)
+        gross.set(room, area)
+        roomComponent.set(room, component.get(from)!)
+      } else if (area < -MIN_ROOM_AREA) {
+        outerContours.push({ component: component.get(from)!, polygon, area: -area })
+      }
     }
   }
+
+  // A detached component nested inside a room is not floor: its outer contour
+  // becomes a hole of the innermost containing room of another component, and
+  // the hole's whole footprint is carved out of that room's area. Components
+  // never touch (touching means shared nodes means one component), so any one
+  // contour vertex decides containment.
+  for (const outer of outerContours) {
+    const anchor = outer.polygon[0]!
+    let parent: Room | undefined
+    for (const room of rooms) {
+      if (roomComponent.get(room) === outer.component) continue
+      if (!pointInPolygon(anchor, room.polygon)) continue
+      if (!parent || gross.get(room)! < gross.get(parent)!) parent = room
+    }
+    if (parent) {
+      parent.holes.push(outer.polygon)
+      parent.area -= outer.area
+    }
+  }
+
   return rooms.sort((a, b) => b.area - a.area)
 }
 
@@ -68,13 +102,49 @@ export function roomKey(room: Room): string {
   return [...room.nodeIds].sort().join('|')
 }
 
-/** The innermost (smallest) room containing the point, or undefined. */
+/** The innermost (smallest) room whose floor contains the point, or undefined. */
 export function roomAt(doc: SceneDocument, pos: Vec2): Room | undefined {
   const rooms = detectRooms(doc) // largest first, so scan from the back
   for (let i = rooms.length - 1; i >= 0; i--) {
-    if (pointInPolygon(pos, rooms[i]!.polygon)) return rooms[i]
+    const room = rooms[i]!
+    if (!pointInPolygon(pos, room.polygon)) continue
+    if (room.holes.some((hole) => pointInPolygon(pos, hole))) continue
+    return room
   }
   return undefined
+}
+
+/** The current room carrying this roomKey, or undefined once the topology changed. */
+export function findRoom(doc: SceneDocument, key: string): Room | undefined {
+  return detectRooms(doc).find((room) => roomKey(room) === key)
+}
+
+/**
+ * What deleting the room removes: its contour walls except those bounding a
+ * neighbouring room too — a room doesn't own a shared wall. Empty both for a
+ * stale key and for a room fully enclosed by neighbours (callers distinguish
+ * via findRoom).
+ */
+export function roomExclusiveWalls(doc: SceneDocument, key: string): Wall[] {
+  const rooms = detectRooms(doc)
+  const target = rooms.find((room) => roomKey(room) === key)
+  if (!target) return []
+
+  const pair = (a: NodeId, b: NodeId) => (a < b ? `${a}:${b}` : `${b}:${a}`)
+  const shared = new Set<string>()
+  for (const room of rooms) {
+    if (room === target) continue
+    for (let i = 0; i < room.nodeIds.length; i++) {
+      shared.add(pair(room.nodeIds[i]!, room.nodeIds[(i + 1) % room.nodeIds.length]!))
+    }
+  }
+
+  const contour = new Set<string>()
+  for (let i = 0; i < target.nodeIds.length; i++) {
+    const edge = pair(target.nodeIds[i]!, target.nodeIds[(i + 1) % target.nodeIds.length]!)
+    if (!shared.has(edge)) contour.add(edge)
+  }
+  return doc.walls.filter((wall) => contour.has(pair(wall.a, wall.b)))
 }
 
 /**
@@ -103,6 +173,28 @@ function cycleNeighbors(doc: SceneDocument): Map<NodeId, NodeId[]> {
     }
   }
   return neighbors
+}
+
+/** Connected-component id per node, over the pruned adjacency. */
+function componentIds(neighbors: Map<NodeId, NodeId[]>): Map<NodeId, number> {
+  const component = new Map<NodeId, number>()
+  let next = 0
+  for (const start of neighbors.keys()) {
+    if (component.has(start)) continue
+    const queue = [start]
+    component.set(start, next)
+    while (queue.length > 0) {
+      const id = queue.pop()!
+      for (const other of neighbors.get(id) ?? []) {
+        if (!component.has(other)) {
+          component.set(other, next)
+          queue.push(other)
+        }
+      }
+    }
+    next++
+  }
+  return component
 }
 
 /** Walks one face starting along from→to and marks its directed edges used. */

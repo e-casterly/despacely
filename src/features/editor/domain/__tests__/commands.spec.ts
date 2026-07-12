@@ -8,11 +8,13 @@ import {
   MoveWallCommand,
   RemoveItemCommand,
   RemoveNodeCommand,
+  RemoveRoomCommand,
   RemoveWallCommand,
   SetWallPropsCommand,
 } from '../commands'
 import { addNode, addWall, createEmptyDocument } from '../operations'
-import type { Item } from '../types'
+import { roomAt, roomKey } from '../rooms'
+import type { Item, SceneDocument } from '../types'
 
 function makeItem(id = 'i1'): Item {
   return {
@@ -25,6 +27,52 @@ function makeItem(id = 'i1'): Item {
     color: '#94a3b8',
   }
 }
+
+/** Two 100x100 rooms sharing a wall; returns the left room's key. */
+function docWithTwoRooms(doc: SceneDocument): string {
+  const a = addNode(doc, { x: 0, y: 0 })
+  const b = addNode(doc, { x: 100, y: 0 })
+  const c = addNode(doc, { x: 100, y: 100 })
+  const d = addNode(doc, { x: 0, y: 100 })
+  const e = addNode(doc, { x: 200, y: 0 })
+  const f = addNode(doc, { x: 200, y: 100 })
+  const edges = [[a, b], [b, c], [c, d], [d, a], [b, e], [e, f], [f, c]] as const
+  for (const [p, q] of edges) addWall(doc, p, q)
+  return [a, b, c, d].sort().join('|')
+}
+
+describe('RemoveRoomCommand', () => {
+  it('removes only the walls the room does not share, GCing loose nodes', () => {
+    const doc = createEmptyDocument()
+    const leftKey = docWithTwoRooms(doc)
+
+    new RemoveRoomCommand(leftKey).do(doc)
+
+    // the shared wall (b-c) and the right room survive
+    expect(doc.walls).toHaveLength(4)
+    expect(Object.keys(doc.nodes)).toHaveLength(4)
+    expect(roomAt(doc, { x: 150, y: 50 })).toBeDefined()
+    expect(roomAt(doc, { x: 50, y: 50 })).toBeUndefined()
+  })
+
+  it('restores walls and nodes on undo and repeats on redo', () => {
+    const doc = createEmptyDocument()
+    const leftKey = docWithTwoRooms(doc)
+    const cmd = new RemoveRoomCommand(leftKey)
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(doc.walls).toHaveLength(7)
+    expect(Object.keys(doc.nodes)).toHaveLength(6)
+    const left = roomAt(doc, { x: 50, y: 50 })!
+    expect(roomKey(left)).toBe(leftKey)
+
+    cmd.do(doc) // redo
+    expect(doc.walls).toHaveLength(4)
+    expect(roomAt(doc, { x: 50, y: 50 })).toBeUndefined()
+  })
+})
 
 describe('AddWallCommand', () => {
   it('adds on do, removes wall and created nodes on undo', () => {

@@ -180,13 +180,21 @@ function drawRooms(
     if (selectedKey !== null && roomKey(room) === selectedKey) {
       ctx.globalAlpha = SELECTED_ROOM_ALPHA
       ctx.fillStyle = palette.accent
-      fillPoly(ctx, room.polygon)
+      fillRoomShape(ctx, room)
       ctx.globalAlpha = 1
     } else {
       ctx.fillStyle = palette.room
-      fillPoly(ctx, room.polygon)
+      fillRoomShape(ctx, room)
     }
   }
+}
+
+/** Fills the room's floor: contour with the nested-loop holes carved out. */
+function fillRoomShape(ctx: CanvasRenderingContext2D, room: Room): void {
+  ctx.beginPath()
+  tracePoly(ctx, room.polygon)
+  for (const hole of room.holes) tracePoly(ctx, hole)
+  ctx.fill('evenodd')
 }
 
 /** Room label: constant screen size, like the node dots. */
@@ -216,6 +224,8 @@ function drawRoomLabels(
   for (const room of rooms) {
     const center = polygonCentroid(room.polygon)
     if (!pointInPolygon(center, room.polygon)) continue
+    // e.g. concentric rooms: the centroid lands in the hole, not on this floor
+    if (room.holes.some((hole) => pointInPolygon(center, hole))) continue
     const text = `${squareCmToM2(room.area)} m²`
     let min = { x: Infinity, y: Infinity }
     let max = { x: -Infinity, y: -Infinity }
@@ -268,10 +278,16 @@ function drawWalls(
 function fillPoly(ctx: CanvasRenderingContext2D, pts: Vec2[]): void {
   if (pts.length === 0) return
   ctx.beginPath()
+  tracePoly(ctx, pts)
+  ctx.fill()
+}
+
+/** Appends one closed ring to the current path (no fill). */
+function tracePoly(ctx: CanvasRenderingContext2D, pts: Vec2[]): void {
+  if (pts.length === 0) return
   ctx.moveTo(pts[0]!.x, pts[0]!.y)
   for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y)
   ctx.closePath()
-  ctx.fill()
 }
 
 /** Vertex dot radius in screen px, zoom-independent like Figma's anchor handles. */

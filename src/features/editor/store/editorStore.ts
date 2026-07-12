@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef } from 'vue'
 import { useToastStore } from '@/stores/toasts'
-import { RemoveNodeCommand, RemoveWallCommand, type Command } from '../domain/commands'
+import { RemoveNodeCommand, RemoveRoomCommand, RemoveWallCommand, type Command } from '../domain/commands'
 import { createEmptyDocument, findNode, findWall } from '../domain/operations'
+import { findRoom, roomExclusiveWalls } from '../domain/rooms'
 import type { SceneDocument } from '../domain/types'
 import type { Selection } from '../tools/types'
 import { documentDb } from '../persistence/documentDb'
@@ -92,9 +93,15 @@ export const useEditorStore = defineStore('editor', () => {
       if (findWall(doc.value, target.id)) apply(new RemoveWallCommand(target.id))
     } else if (target.kind === 'node') {
       if (findNode(doc.value, target.id)) apply(new RemoveNodeCommand(target.id))
+    } else if (findRoom(doc.value, target.id)) {
+      // a room fully enclosed by neighbours has nothing of its own to delete;
+      // explain instead of pushing an empty history entry
+      if (roomExclusiveWalls(doc.value, target.id).length === 0) {
+        toasts.show("Couldn't delete the room: every wall is shared.", 'error')
+      } else {
+        apply(new RemoveRoomCommand(target.id))
+      }
     }
-    // kind 'room' only clears: a room doesn't own its walls (they may bound a
-    // neighbour too), so what "delete room" removes is deliberately unresolved
   }
 
   function undo() {
