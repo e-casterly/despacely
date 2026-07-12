@@ -11,6 +11,31 @@ export function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby))
 }
 
+/** Area-weighted centroid of a simple polygon; vertex mean when the area is zero. */
+export function polygonCentroid(polygon: Vec2[]): Vec2 {
+  let area2 = 0 // twice the signed area
+  let cx = 0
+  let cy = 0
+  for (let i = 0; i < polygon.length; i++) {
+    const p = polygon[i]!
+    const q = polygon[(i + 1) % polygon.length]!
+    const cross = p.x * q.y - q.x * p.y
+    area2 += cross
+    cx += (p.x + q.x) * cross
+    cy += (p.y + q.y) * cross
+  }
+  if (area2 === 0) {
+    let sx = 0
+    let sy = 0
+    for (const p of polygon) {
+      sx += p.x
+      sy += p.y
+    }
+    return { x: sx / polygon.length, y: sy / polygon.length }
+  }
+  return { x: cx / (3 * area2), y: cy / (3 * area2) }
+}
+
 /** Whether a point lies inside a simple polygon (ray casting); used for room hit-testing. */
 export function pointInPolygon(p: Vec2, polygon: Vec2[]): boolean {
   let inside = false

@@ -3,6 +3,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import { MoveNodeCommand, SetWallPropsCommand } from '../domain/commands'
 import { collapsesAWall, findNode, findWall, wallsAtNode, wallSegment } from '../domain/operations'
 import { detectRooms, roomKey } from '../domain/rooms'
+import { squareCmToM2 } from '../domain/units'
 import { useEditorStore } from '../store/editorStore'
 import { useDocSnapshot } from '../store/useDocSnapshot'
 import EditorNumberField from './EditorNumberField.vue'
@@ -58,7 +59,7 @@ const room = useDocSnapshot((doc) => {
   }
   return {
     // rooms are human-scale, so area reads in m² while lengths stay in cm
-    area: Math.round(found.area / 100) / 100,
+    area: squareCmToM2(found.area),
     perimeter: Math.round(perimeter * 10) / 10,
     corners: found.nodeIds.length,
   }

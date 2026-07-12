@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { distToSegment, pointInPolygon, pointInRotatedRect } from '../geometry'
+import { distToSegment, pointInPolygon, pointInRotatedRect, polygonCentroid } from '../geometry'
 
 describe('distToSegment', () => {
   const a = { x: 0, y: 0 }
@@ -48,6 +48,43 @@ describe('pointInPolygon', () => {
     ]
     expect(pointInPolygon({ x: 50, y: 150 }, lShape)).toBe(true)
     expect(pointInPolygon({ x: 150, y: 150 }, lShape)).toBe(false)
+  })
+})
+
+describe('polygonCentroid', () => {
+  it('finds the middle of a square', () => {
+    expect(
+      polygonCentroid([
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 100, y: 100 },
+        { x: 0, y: 100 },
+      ]),
+    ).toEqual({ x: 50, y: 50 })
+  })
+
+  it('weights by area for an L-shape', () => {
+    // 200x100 rect (area 20000, centre (100,50)) + 100x100 rect (10000, (50,150))
+    const centroid = polygonCentroid([
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 100 },
+      { x: 100, y: 100 },
+      { x: 100, y: 200 },
+      { x: 0, y: 200 },
+    ])
+    expect(centroid.x).toBeCloseTo(250 / 3)
+    expect(centroid.y).toBeCloseTo(250 / 3)
+  })
+
+  it('falls back to the vertex mean for a zero-area polygon', () => {
+    expect(
+      polygonCentroid([
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+        { x: 200, y: 0 },
+      ]),
+    ).toEqual({ x: 100, y: 0 })
   })
 })
 

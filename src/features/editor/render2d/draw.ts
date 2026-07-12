@@ -1,6 +1,7 @@
+import { pointInPolygon, polygonCentroid } from '../domain/geometry'
 import { nodeAt } from '../domain/operations'
-import { detectRooms, roomKey } from '../domain/rooms'
-import { WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
+import { detectRooms, roomKey, type Room } from '../domain/rooms'
+import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { Selection, ToolOverlay } from '../tools/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
@@ -12,6 +13,7 @@ export interface CanvasPalette {
   gridMid: string
   gridStrong: string
   room: string
+  roomLabel: string
   wall: string
   accent: string
 }
@@ -57,13 +59,15 @@ export function render(
   // The ghost is drawn through the same path as real walls so the two miter
   // against each other; node dots stay on the real doc so the cursor end has none.
   const ghost = view.overlay?.ghostWall ? augmentWithGhost(viewDoc, view.overlay.ghostWall) : null
+  // rooms derive from viewDoc: a drag preview moves them live, while the
+  // uncommitted ghost wall never closes one
+  const rooms = detectRooms(viewDoc)
   withWorldTransform(ctx, vp, dpr, () => {
-    // rooms derive from viewDoc: a drag preview moves them live, while the
-    // uncommitted ghost wall never closes one
-    drawRooms(ctx, viewDoc, palette, selectedRoomKey)
+    drawRooms(ctx, rooms, palette, selectedRoomKey)
     drawWalls(ctx, ghost?.doc ?? viewDoc, palette, selectedWallId, ghost?.ghostId ?? null)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
+    drawRoomLabels(ctx, vp, rooms, palette)
     if (view.overlay?.mergeTarget) drawMergeRing(ctx, vp, viewDoc, palette, view.overlay.mergeTarget)
   })
 }
@@ -162,16 +166,17 @@ const SELECTED_ROOM_ALPHA = 0.25
 
 /**
  * Fills every closed wall contour, largest first so a loop nested inside a
- * room stays visible on top. Recomputed per repaint like the wall miters —
- * both walk the same graph and neither is worth caching at this scene size.
+ * room stays visible on top. Rooms are recomputed per repaint like the wall
+ * miters — both walk the same graph and neither is worth caching at this
+ * scene size.
  */
 function drawRooms(
   ctx: CanvasRenderingContext2D,
-  doc: SceneDocument,
+  rooms: Room[],
   palette: CanvasPalette,
   selectedKey: string | null,
 ): void {
-  for (const room of detectRooms(doc)) {
+  for (const room of rooms) {
     if (selectedKey !== null && roomKey(room) === selectedKey) {
       ctx.globalAlpha = SELECTED_ROOM_ALPHA
       ctx.fillStyle = palette.accent
@@ -181,6 +186,46 @@ function drawRooms(
       ctx.fillStyle = palette.room
       fillPoly(ctx, room.polygon)
     }
+  }
+}
+
+/** Room label: constant screen size, like the node dots. */
+const ROOM_LABEL_FONT_PX = 12
+/** Mirrors --font-sans; canvas text can't read CSS custom properties. */
+const ROOM_LABEL_FONT = "'Nunito Sans Variable', ui-sans-serif, system-ui, sans-serif"
+/** Breathing room (screen px) the label needs inside the room's bbox to show at all. */
+const ROOM_LABEL_PADDING_PX = 8
+
+/**
+ * Writes each room's area (m²) at its centroid. A label is skipped when the
+ * room can't fit it on screen (small room or far zoom — they reappear on zoom
+ * in) and when the centroid falls outside a strongly concave contour.
+ */
+function drawRoomLabels(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  rooms: Room[],
+  palette: CanvasPalette,
+): void {
+  const fontSize = ROOM_LABEL_FONT_PX / vp.zoom // world cm that render as 12px
+  const pad = ROOM_LABEL_PADDING_PX / vp.zoom
+  ctx.font = `${fontSize}px ${ROOM_LABEL_FONT}`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = palette.roomLabel
+  for (const room of rooms) {
+    const center = polygonCentroid(room.polygon)
+    if (!pointInPolygon(center, room.polygon)) continue
+    const text = `${squareCmToM2(room.area)} m²`
+    let min = { x: Infinity, y: Infinity }
+    let max = { x: -Infinity, y: -Infinity }
+    for (const p of room.polygon) {
+      min = { x: Math.min(min.x, p.x), y: Math.min(min.y, p.y) }
+      max = { x: Math.max(max.x, p.x), y: Math.max(max.y, p.y) }
+    }
+    const fitsX = ctx.measureText(text).width + pad <= max.x - min.x
+    const fitsY = fontSize * 1.4 + pad <= max.y - min.y
+    if (fitsX && fitsY) ctx.fillText(text, center.x, center.y)
   }
 }
 
