@@ -20,6 +20,8 @@
   --color-grid-fine: #f1f5f9;
   --color-grid-mid: #e2e8f0;
   --color-grid-strong: #cbd5e1;
+  /* room fill: translucent so the grid shows through and nested rooms stack darker */
+  --color-room: rgb(99 102 241 / 0.07);
 
   /* feedback */
   --color-danger: #ef4444;

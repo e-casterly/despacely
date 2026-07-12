@@ -1,4 +1,5 @@
 import { nodeAt } from '../domain/operations'
+import { detectRooms } from '../domain/rooms'
 import { WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { Selection, ToolOverlay } from '../tools/types'
@@ -10,6 +11,7 @@ export interface CanvasPalette {
   gridFine: string
   gridMid: string
   gridStrong: string
+  room: string
   wall: string
   accent: string
 }
@@ -55,6 +57,9 @@ export function render(
   // against each other; node dots stay on the real doc so the cursor end has none.
   const ghost = view.overlay?.ghostWall ? augmentWithGhost(viewDoc, view.overlay.ghostWall) : null
   withWorldTransform(ctx, vp, dpr, () => {
+    // rooms derive from viewDoc: a drag preview moves them live, while the
+    // uncommitted ghost wall never closes one
+    drawRooms(ctx, viewDoc, palette)
     drawWalls(ctx, ghost?.doc ?? viewDoc, palette, selectedWallId, ghost?.ghostId ?? null)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
@@ -149,6 +154,16 @@ function withWorldTransform(
   )
   fn()
   ctx.restore()
+}
+
+/**
+ * Fills every closed wall contour, largest first so a loop nested inside a
+ * room stays visible on top. Recomputed per repaint like the wall miters —
+ * both walk the same graph and neither is worth caching at this scene size.
+ */
+function drawRooms(ctx: CanvasRenderingContext2D, doc: SceneDocument, palette: CanvasPalette): void {
+  ctx.fillStyle = palette.room
+  for (const room of detectRooms(doc)) fillPoly(ctx, room.polygon)
 }
 
 /**

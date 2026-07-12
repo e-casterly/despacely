@@ -49,6 +49,7 @@ let palette: CanvasPalette = {
   gridFine: '#f1f5f9',
   gridMid: '#e2e8f0',
   gridStrong: '#cbd5e1',
+  room: 'rgb(99 102 241 / 0.07)',
   wall: '#1e293b',
   accent: '#6366f1',
 }
@@ -80,6 +81,7 @@ function readPalette(): CanvasPalette {
     gridFine: token('--color-grid-fine', palette.gridFine),
     gridMid: token('--color-grid-mid', palette.gridMid),
     gridStrong: token('--color-grid-strong', palette.gridStrong),
+    room: token('--color-room', palette.room),
     wall: token('--color-text', palette.wall),
     accent: token('--color-primary', palette.accent),
   }
