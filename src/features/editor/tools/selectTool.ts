@@ -1,4 +1,4 @@
-import { MergeNodesCommand, MoveNodeCommand, MoveWallCommand } from '../domain/commands'
+import { MergeNodesCommand, MoveNodeCommand, MoveNodesCommand } from '../domain/commands'
 import { distToSegment } from '../domain/geometry'
 import { collapsesAWall, nodeAt, nodesConnected, wallSegment } from '../domain/operations'
 import { roomAt, roomKey } from '../domain/rooms'
@@ -35,7 +35,8 @@ function samePoint(a: Vec2, b: Vec2): boolean {
 
 type Drag =
   | { kind: 'node'; nodeId: NodeId; from: Vec2; to: Vec2; mergeInto: NodeId | null }
-  | { kind: 'wall'; grab: Vec2; ends: { nodeId: NodeId; from: Vec2 }[]; delta: Vec2 }
+  // a wall body and a room contour drag the same way: one delta over a node set
+  | { kind: 'wall' | 'room'; grab: Vec2; ends: { nodeId: NodeId; from: Vec2 }[]; delta: Vec2 }
 
 /** The dragged nodes at their preview positions (empty when nothing moved yet). */
 function draggedNodes(drag: Drag): Record<NodeId, Vec2> {
@@ -52,10 +53,11 @@ function draggedNodes(drag: Drag): Record<NodeId, Vec2> {
 }
 
 /**
- * Default mode: click a wall or a vertex dot to select it, click empty space
- * to clear. Dragging moves things (grid-snapped): a vertex dot moves that
- * vertex, a wall body moves the whole wall; shared corners follow either way.
- * The document is only touched on pointerup, as a single undoable command.
+ * Default mode: click a wall, a vertex dot or a room to select it, click
+ * empty space to clear. Dragging moves things (grid-snapped): a vertex dot
+ * moves that vertex, a wall body moves the whole wall, a room floor moves the
+ * whole contour; shared corners follow in every case. The document is only
+ * touched on pointerup, as a single undoable command.
  */
 export function createSelectTool(): Tool {
   let drag: Drag | null = null
@@ -92,9 +94,18 @@ export function createSelectTool(): Tool {
         return
       }
       // nothing solid under the pointer: the room the click landed in, if any.
-      // Selection only — a room has no drag (its walls are dragged individually).
+      // Dragging moves the whole contour; nested loops and spur walls keep
+      // their own nodes and follow only where they share a contour vertex.
       const room = roomAt(ctx.doc, input.world)
       ctx.select(room ? { kind: 'room', id: roomKey(room) } : null)
+      if (room) {
+        drag = {
+          kind: 'room',
+          grab: input.world,
+          ends: room.nodeIds.map((id) => ({ nodeId: id, from: ctx.doc.nodes[id]!.pos })),
+          delta: { x: 0, y: 0 },
+        }
+      }
     },
 
     onPointerMove(input: PointerInput, ctx: ToolContext) {
@@ -141,8 +152,9 @@ export function createSelectTool(): Tool {
       } else if (drag.delta.x !== 0 || drag.delta.y !== 0) {
         const moved = draggedNodes(drag)
         ctx.apply(
-          new MoveWallCommand(
+          new MoveNodesCommand(
             drag.ends.map((end) => ({ nodeId: end.nodeId, from: end.from, to: moved[end.nodeId]! })),
+            drag.kind === 'room' ? 'Move room' : 'Move wall',
           ),
         )
       }

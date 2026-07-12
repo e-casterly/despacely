@@ -226,11 +226,15 @@ export interface NodeMove {
   to: Vec2
 }
 
-/** Moves a whole wall by relocating both endpoints; shared corners follow. */
-export class MoveWallCommand implements Command {
-  readonly label = 'Move wall'
-
-  constructor(private readonly moves: NodeMove[]) {}
+/**
+ * Moves a set of vertices as one history entry — a wall body ('Move wall') or
+ * a whole room contour ('Move room'); shared corners follow either way.
+ */
+export class MoveNodesCommand implements Command {
+  constructor(
+    private readonly moves: NodeMove[],
+    readonly label: string,
+  ) {}
 
   do(doc: SceneDocument): void {
     for (const move of this.moves) moveNode(doc, move.nodeId, move.to)

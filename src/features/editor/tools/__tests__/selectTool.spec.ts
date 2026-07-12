@@ -79,7 +79,7 @@ describe('selectTool', () => {
 })
 
 describe('selectTool rooms', () => {
-  function docWithRoom(): { doc: SceneDocument; key: string } {
+  function docWithRoom(): { doc: SceneDocument; key: string; ids: string[] } {
     const doc = createEmptyDocument()
     const corners = [
       { x: 0, y: 0 },
@@ -89,7 +89,7 @@ describe('selectTool rooms', () => {
     ]
     const ids = corners.map((p) => addNode(doc, p))
     for (let i = 0; i < ids.length; i++) addWall(doc, ids[i]!, ids[(i + 1) % ids.length]!)
-    return { doc, key: [...ids].sort().join('|') }
+    return { doc, key: [...ids].sort().join('|'), ids }
   }
 
   it('selects the room when the click hits neither a vertex nor a wall', () => {
@@ -110,16 +110,65 @@ describe('selectTool rooms', () => {
     expect(select).toHaveBeenCalledWith(expect.objectContaining({ kind: 'wall' }))
   })
 
-  it('does not start a drag from a room click', () => {
+  it('drags the whole room: snapped delta, every corner in one command', () => {
+    const { doc, ids } = docWithRoom()
+    const { ctx, apply } = ctxFor(doc)
+    const [a, b, c, d] = ids as [string, string, string, string]
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 100), ctx)
+    tool.onPointerMove!(at(137, 112), ctx) // raw delta (37,12) -> snapped (40,10)
+
+    expect(tool.preview).toEqual({
+      movedNodes: {
+        [a]: { x: 40, y: 10 },
+        [b]: { x: 240, y: 10 },
+        [c]: { x: 240, y: 210 },
+        [d]: { x: 40, y: 210 },
+      },
+    })
+    expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 }) // doc untouched until pointerup
+
+    tool.onPointerUp!(at(137, 112), ctx)
+
+    expect(apply).toHaveBeenCalledTimes(1)
+    const command = apply.mock.calls[0]![0]
+    expect(command.label).toBe('Move room')
+    command.do(doc)
+    expect(doc.nodes[a]!.pos).toEqual({ x: 40, y: 10 })
+    expect(doc.nodes[c]!.pos).toEqual({ x: 240, y: 210 })
+    command.undo(doc)
+    expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 })
+    expect(doc.nodes[c]!.pos).toEqual({ x: 200, y: 200 })
+  })
+
+  it('a room click with sub-grid jitter applies nothing', () => {
     const { doc } = docWithRoom()
     const { ctx, apply } = ctxFor(doc)
     const tool = createSelectTool()
 
     tool.onPointerDown!(at(100, 100), ctx)
-    tool.onPointerMove!(at(150, 150), ctx)
-    expect(tool.preview).toBeNull()
-    tool.onPointerUp!(at(150, 150), ctx)
+    tool.onPointerMove!(at(102, 101), ctx) // under half a grid step
+    tool.onPointerUp!(at(102, 101), ctx)
 
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('refuses a delta that would collapse a wall hanging off the contour', () => {
+    // spur from the (200,200) corner to (250,200): moving the room right by 50
+    // would land the corner on the spur's far end, collapsing the spur
+    const { doc, ids } = docWithRoom()
+    const spurEnd = addNode(doc, { x: 250, y: 200 })
+    addWall(doc, ids[2]!, spurEnd)
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 100), ctx)
+    tool.onPointerMove!(at(150, 100), ctx) // delta exactly (50,0)
+
+    expect(tool.preview).toBeNull() // move refused, nothing shown
+
+    tool.onPointerUp!(at(150, 100), ctx)
     expect(apply).not.toHaveBeenCalled()
   })
 })

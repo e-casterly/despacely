@@ -5,7 +5,7 @@ import {
   MergeNodesCommand,
   MoveItemCommand,
   MoveNodeCommand,
-  MoveWallCommand,
+  MoveNodesCommand,
   RemoveItemCommand,
   RemoveNodeCommand,
   RemoveRoomCommand,
@@ -281,16 +281,20 @@ describe('MoveNodeCommand', () => {
   })
 })
 
-describe('MoveWallCommand', () => {
-  it('moves both endpoints as one entry and reverts them together', () => {
+describe('MoveNodesCommand', () => {
+  it('moves the node set as one entry and reverts it together', () => {
     const doc = createEmptyDocument()
     const a = addNode(doc, { x: 0, y: 0 })
     const b = addNode(doc, { x: 100, y: 0 })
     addWall(doc, a, b)
-    const cmd = new MoveWallCommand([
-      { nodeId: a, from: { x: 0, y: 0 }, to: { x: 0, y: 50 } },
-      { nodeId: b, from: { x: 100, y: 0 }, to: { x: 100, y: 50 } },
-    ])
+    const cmd = new MoveNodesCommand(
+      [
+        { nodeId: a, from: { x: 0, y: 0 }, to: { x: 0, y: 50 } },
+        { nodeId: b, from: { x: 100, y: 0 }, to: { x: 100, y: 50 } },
+      ],
+      'Move wall',
+    )
+    expect(cmd.label).toBe('Move wall')
 
     cmd.do(doc)
     expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 50 })
