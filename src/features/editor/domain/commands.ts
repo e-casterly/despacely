@@ -59,6 +59,48 @@ export class AddWallCommand implements Command {
   }
 }
 
+/**
+ * Adds a closed loop of walls through the given corners (the last corner
+ * connects back to the first) as one history entry. The wall tool builds these
+ * one segment per command; a room is drawn in a single gesture, so it undoes as
+ * a whole. Endpoints snap to nearby nodes exactly like {@link AddWallCommand},
+ * so consecutive corners share their joint and the loop can weld onto existing
+ * geometry; a degenerate edge (coincident corners) is skipped.
+ */
+export class AddRoomCommand implements Command {
+  readonly label = 'Add room'
+  private walls: Wall[] = []
+  private createdNodes: Node[] = []
+
+  constructor(
+    private readonly corners: Vec2[],
+    private readonly opts: WallOptions & { snapDist?: number } = {},
+  ) {}
+
+  do(doc: SceneDocument): void {
+    if (this.walls.length > 0) {
+      // redo: re-insert the exact entities created the first time
+      for (const node of this.createdNodes) doc.nodes[node.id] = node
+      doc.walls.push(...this.walls)
+      return
+    }
+    const before = new Set(Object.keys(doc.nodes))
+    for (let i = 0; i < this.corners.length; i++) {
+      const from = this.corners[i]!
+      const to = this.corners[(i + 1) % this.corners.length]!
+      const wall = addWallBetween(doc, from, to, this.opts)
+      if (wall) this.walls.push(wall)
+    }
+    this.createdNodes = Object.values(doc.nodes).filter((node) => !before.has(node.id))
+  }
+
+  undo(doc: SceneDocument): void {
+    const wallIds = new Set(this.walls.map((w) => w.id))
+    doc.walls = doc.walls.filter((w) => !wallIds.has(w.id))
+    for (const node of this.createdNodes) delete doc.nodes[node.id]
+  }
+}
+
 /** Deletes a wall, restoring it (and any GC'd endpoints) on undo. */
 export class RemoveWallCommand implements Command {
   readonly label = 'Delete wall'

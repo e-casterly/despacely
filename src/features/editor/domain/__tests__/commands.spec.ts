@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   AddItemCommand,
+  AddRoomCommand,
   AddWallCommand,
   MergeNodesCommand,
   MoveItemCommand,
@@ -115,6 +116,69 @@ describe('AddWallCommand', () => {
     cmd.undo(doc)
 
     expect(doc.nodes[shared]).toBeDefined() // reused, not created -> not deleted
+    expect(doc.walls).toHaveLength(1)
+  })
+})
+
+describe('AddRoomCommand', () => {
+  // a 200x100 rectangle, corners in order
+  const rect = [
+    { x: 0, y: 0 },
+    { x: 200, y: 0 },
+    { x: 200, y: 100 },
+    { x: 0, y: 100 },
+  ]
+
+  it('adds four walls sharing four corner nodes, forming one room', () => {
+    const doc = createEmptyDocument()
+
+    new AddRoomCommand(rect, { snapDist: 5 }).do(doc)
+
+    expect(doc.walls).toHaveLength(4)
+    expect(Object.keys(doc.nodes)).toHaveLength(4) // shared corners, not 8
+    expect(roomAt(doc, { x: 100, y: 50 })).toBeDefined()
+  })
+
+  it('removes every wall and created node on undo', () => {
+    const doc = createEmptyDocument()
+    const cmd = new AddRoomCommand(rect, { snapDist: 5 })
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(doc.walls).toHaveLength(0)
+    expect(doc.nodes).toEqual({})
+  })
+
+  it('redoes with the same wall and node ids', () => {
+    const doc = createEmptyDocument()
+    const cmd = new AddRoomCommand(rect, { snapDist: 5 })
+
+    cmd.do(doc)
+    const wallIds = doc.walls.map((w) => w.id).sort()
+    const nodeIds = Object.keys(doc.nodes).sort()
+
+    cmd.undo(doc)
+    cmd.do(doc) // redo
+
+    expect(doc.walls.map((w) => w.id).sort()).toEqual(wallIds)
+    expect(Object.keys(doc.nodes).sort()).toEqual(nodeIds)
+  })
+
+  it('welds onto an existing vertex and keeps it on undo', () => {
+    const doc = createEmptyDocument()
+    const shared = addNode(doc, { x: 0, y: 0 })
+    const other = addNode(doc, { x: 0, y: -100 })
+    addWall(doc, shared, other)
+
+    const cmd = new AddRoomCommand(rect, { snapDist: 5 })
+    cmd.do(doc)
+    // the room's first corner reused the existing node instead of making a new one
+    expect(Object.keys(doc.nodes)).toHaveLength(5) // 2 existing + 3 new corners
+    expect(doc.walls).toHaveLength(5)
+
+    cmd.undo(doc)
+    expect(doc.nodes[shared]).toBeDefined() // reused, not created -> survives undo
     expect(doc.walls).toHaveLength(1)
   })
 })

@@ -57,21 +57,25 @@ export function render(
   // positions on a render-only copy, so the real document stays untouched
   // until the move is committed as a command.
   const viewDoc = view.overlay?.movedNodes ? withMovedNodes(doc, view.overlay.movedNodes) : doc
-  // The ghost is drawn through the same path as real walls so the two miter
-  // against each other; node dots stay on the real doc so the cursor end has none.
-  const ghost = view.overlay?.ghostWall ? augmentWithGhost(viewDoc, view.overlay.ghostWall) : null
-  // rooms derive from viewDoc: a drag preview moves them live, while the
-  // uncommitted ghost wall never closes one
-  const rooms = detectRooms(viewDoc)
+  // The ghost (a single wall, or the four edges of a room being drawn) is drawn
+  // through the same path as real walls so they all miter against each other;
+  // node dots stay on the real doc so the ghost corners carry none.
+  const ghostSegs = ghostSegments(view.overlay)
+  const ghost = ghostSegs ? augmentWithGhost(viewDoc, ghostSegs) : null
+  // rooms derive from the ghost doc when one exists, so a closed ghost loop — a
+  // room being drawn, or a wall ghost completing a loop — fills live; otherwise
+  // from viewDoc, where a drag preview moves existing rooms
+  const rooms = detectRooms(ghost?.doc ?? viewDoc)
   // one miter pass per repaint, shared by the wall fills and the face labels
   // (selection and ghost never coexist, so the ghost never skews label faces)
   const geometry = computeWallGeometry(ghost?.doc ?? viewDoc)
   withWorldTransform(ctx, vp, dpr, () => {
     drawRooms(ctx, rooms, palette, selectedRoomKey)
-    drawWalls(ctx, ghost?.doc ?? viewDoc, geometry, palette, selectedWallId, ghost?.ghostId ?? null)
+    drawWalls(ctx, ghost?.doc ?? viewDoc, geometry, palette, selectedWallId, ghost?.ghostIds ?? null)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
     drawRoomLabels(ctx, vp, rooms, palette)
+    if (view.overlay?.roomDraft) drawRoomDraft(ctx, vp, view.overlay.roomDraft, palette)
     drawWallLengths(ctx, vp, lengthLabelSegments(viewDoc, rooms, geometry.faces, view), palette)
     if (view.overlay?.mergeTarget) drawMergeRing(ctx, vp, viewDoc, palette, view.overlay.mergeTarget)
   })
@@ -132,32 +136,58 @@ function withMovedNodes(doc: SceneDocument, moved: Record<NodeId, Vec2>): SceneD
   return { ...doc, nodes }
 }
 
+/** The ghost — a wall or a room's corner loop — as a flat list of segments. */
+function ghostSegments(overlay: ToolOverlay | null | undefined): { a: Vec2; b: Vec2 }[] | null {
+  if (overlay?.ghostRoom) return loopEdges(overlay.ghostRoom)
+  if (overlay?.ghostWall) return [overlay.ghostWall]
+  return null
+}
+
+/** Connects an ordered corner loop into its edges (the last back to the first). */
+function loopEdges(corners: Vec2[]): { a: Vec2; b: Vec2 }[] {
+  return corners.map((a, i) => ({ a, b: corners[(i + 1) % corners.length]! }))
+}
+
 /** Snap radius (cm) used to match a ghost endpoint onto an existing node. */
 const GHOST_SNAP = 0.5
 const GHOST_ID = '__ghost__'
 
 /**
- * Returns a render-only copy of the doc with the in-progress wall appended as a
- * temporary wall, its endpoints resolved onto existing nodes where they land so
- * the joint miters on both sides. Null if the segment is degenerate.
+ * Returns a render-only copy of the doc with the in-progress ghost walls
+ * appended: corners shared between segments collapse to one node, and any
+ * endpoint landing on an existing node reuses it, so the ghost miters against
+ * itself and the scene. Null when no non-degenerate segment survives.
  */
 function augmentWithGhost(
   doc: SceneDocument,
-  seg: { a: Vec2; b: Vec2 },
-): { doc: SceneDocument; ghostId: string } | null {
+  segs: { a: Vec2; b: Vec2 }[],
+): { doc: SceneDocument; ghostIds: Set<string> } | null {
   const nodes = { ...doc.nodes }
-  const resolve = (p: Vec2, tempId: NodeId): NodeId => {
+  const corners = new Map<string, NodeId>()
+  const resolve = (p: Vec2): NodeId => {
     const existing = nodeAt(doc, p, GHOST_SNAP)
     if (existing) return existing.id
-    nodes[tempId] = { id: tempId, pos: p }
-    return tempId
+    const key = `${p.x}:${p.y}`
+    let id = corners.get(key)
+    if (id === undefined) {
+      id = `${GHOST_ID}${corners.size}`
+      corners.set(key, id)
+      nodes[id] = { id, pos: p }
+    }
+    return id
   }
-  const a = resolve(seg.a, '__ghost_a__')
-  const b = resolve(seg.b, '__ghost_b__')
-  if (a === b) return null
-
-  const ghost: Wall = { id: GHOST_ID, a, b, thickness: WALL_THICKNESS, height: WALL_HEIGHT }
-  return { doc: { ...doc, nodes, walls: [...doc.walls, ghost] }, ghostId: GHOST_ID }
+  const walls = [...doc.walls]
+  const ghostIds = new Set<string>()
+  segs.forEach((seg, i) => {
+    const a = resolve(seg.a)
+    const b = resolve(seg.b)
+    if (a === b) return
+    const id = `${GHOST_ID}wall${i}`
+    walls.push({ id, a, b, thickness: WALL_THICKNESS, height: WALL_HEIGHT })
+    ghostIds.add(id)
+  })
+  if (ghostIds.size === 0) return null
+  return { doc: { ...doc, nodes, walls }, ghostIds }
 }
 
 /**
@@ -323,6 +353,12 @@ function lengthLabelSegments(
   if (view.overlay?.ghostWall) {
     segments.push({ ...view.overlay.ghostWall, clearance: WALL_THICKNESS / 2, mustFit: false })
   }
+  // each edge of a room being drawn is its own live ruler, like the wall ghost
+  if (view.overlay?.ghostRoom) {
+    for (const edge of loopEdges(view.overlay.ghostRoom)) {
+      segments.push({ ...edge, clearance: WALL_THICKNESS / 2, mustFit: false })
+    }
+  }
   if (selection?.kind === 'wall') {
     const face = faces.get(selection.id)
     if (face) {
@@ -399,6 +435,43 @@ export function uprightAngle(dx: number, dy: number): number {
   return angle
 }
 
+/** Draft room readout size (screen px), matching the wall length labels. */
+const ROOM_DRAFT_FONT_PX = 11
+/** Screen gap between the dragged corner and its size readout. */
+const ROOM_DRAFT_GAP_PX = 6
+
+/**
+ * A room being drawn that is still too small to place: a thin accent outline
+ * (no walls, no fill) plus one compact `W × H` readout by the dragged corner, so
+ * the gesture reads from its first pixel even before it clears the placement
+ * threshold — including a wide-but-shallow drag the full ghost would hide. The
+ * label sits diagonally outside the corner, on whichever side the drag opened.
+ */
+function drawRoomDraft(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  corners: Vec2[],
+  palette: CanvasPalette,
+): void {
+  if (corners.length < 4) return
+  ctx.strokeStyle = palette.accent
+  ctx.lineWidth = 1 / vp.zoom
+  ctx.beginPath()
+  tracePoly(ctx, corners)
+  ctx.stroke()
+
+  const a = corners[0]!
+  const c = corners[2]! // the dragged corner, opposite the anchor
+  const w = Math.round(Math.abs(c.x - a.x) * 10) / 10
+  const h = Math.round(Math.abs(c.y - a.y) * 10) / 10
+  const gap = ROOM_DRAFT_GAP_PX / vp.zoom
+  ctx.font = `${ROOM_DRAFT_FONT_PX / vp.zoom}px ${ROOM_LABEL_FONT}`
+  ctx.fillStyle = palette.accent
+  ctx.textAlign = c.x >= a.x ? 'left' : 'right'
+  ctx.textBaseline = c.y >= a.y ? 'top' : 'bottom'
+  ctx.fillText(`${w} × ${h} cm`, c.x + (c.x >= a.x ? gap : -gap), c.y + (c.y >= a.y ? gap : -gap))
+}
+
 /**
  * Each wall is one filled polygon, mitered at shared nodes so neighbours tile
  * without overlap or notch; too-sharp corners get a flat bevel (see wallJoints).
@@ -411,10 +484,11 @@ function drawWalls(
   geometry: WallGeometry,
   palette: CanvasPalette,
   selectedWallId: string | null,
-  ghostId: string | null,
+  ghostIds: Set<string> | null,
 ): void {
   const { polygons } = geometry
-  const isFront = (id: string): boolean => id === selectedWallId || id === ghostId
+  const isGhost = (id: string): boolean => ghostIds?.has(id) ?? false
+  const isFront = (id: string): boolean => id === selectedWallId || isGhost(id)
 
   const front: string[] = []
   ctx.globalAlpha = 1
@@ -429,7 +503,7 @@ function drawWalls(
     fillPoly(ctx, poly)
   }
   for (const id of front) {
-    ctx.globalAlpha = id === ghostId ? 0.5 : 1
+    ctx.globalAlpha = isGhost(id) ? 0.5 : 1
     ctx.fillStyle = palette.accent
     fillPoly(ctx, polygons.get(id)!)
   }

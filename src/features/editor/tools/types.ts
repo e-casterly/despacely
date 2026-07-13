@@ -3,7 +3,7 @@ import type { Guide } from '../domain/snapping'
 import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 
 /** The editor's active interaction mode. 'select' is the neutral mode. */
-export type ToolId = 'select' | 'wall'
+export type ToolId = 'select' | 'wall' | 'room'
 
 /** A pointer event delivered to a tool in world coordinates (cm). */
 export interface PointerInput {
@@ -30,6 +30,10 @@ export interface ToolContext {
 /** Transient visuals a tool draws over the scene (e.g. the wall being placed). */
 export interface ToolOverlay {
   ghostWall?: { a: Vec2; b: Vec2 }
+  /** In-progress room: the ordered corners of the closed loop being drawn. */
+  ghostRoom?: Vec2[]
+  /** A room still too small to place: shown as a light outline, not the full ghost. */
+  roomDraft?: Vec2[]
   /** Drag preview: render these nodes (and walls on them) at overridden positions. */
   movedNodes?: Record<NodeId, Vec2>
   /** Ring on the vertex the dragged vertex will weld into when dropped. */

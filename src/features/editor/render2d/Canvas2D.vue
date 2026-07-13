@@ -7,6 +7,7 @@ import { docBounds } from '../domain/operations'
 import type { Vec2 } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolId } from '../tools/types'
 import { createWallTool } from '../tools/wallTool'
+import { createRoomTool } from '../tools/roomTool'
 import { createSelectTool } from '../tools/selectTool'
 
 const { activeTool } = defineProps<{ activeTool: ToolId }>()
@@ -25,6 +26,7 @@ const zoomLevel = ref(viewport.zoom)
 const tools: Partial<Record<ToolId, Tool>> = {
   select: createSelectTool(),
   wall: createWallTool(),
+  room: createRoomTool(),
 }
 function currentTool(): Tool | undefined {
   return tools[activeTool]
@@ -254,7 +256,7 @@ onBeforeUnmount(() => {
           ? 'cursor-grabbing'
           : spaceHeld
             ? 'cursor-grab'
-            : activeTool === 'wall'
+            : activeTool === 'wall' || activeTool === 'room'
               ? 'cursor-crosshair'
               : ''
       "
