@@ -110,21 +110,21 @@ describe('selectTool rooms', () => {
     expect(select).toHaveBeenCalledWith(expect.objectContaining({ kind: 'wall' }))
   })
 
-  it('drags the whole room: snapped delta, every corner in one command', () => {
+  it('drags the whole room: free delta with no other vertices, one command', () => {
     const { doc, ids } = docWithRoom()
     const { ctx, apply } = ctxFor(doc)
     const [a, b, c, d] = ids as [string, string, string, string]
     const tool = createSelectTool()
 
     tool.onPointerDown!(at(100, 100), ctx)
-    tool.onPointerMove!(at(137, 112), ctx) // raw delta (37,12) -> snapped (40,10)
+    tool.onPointerMove!(at(137, 112), ctx) // raw delta (37,12); nothing to align to
 
     expect(tool.preview).toEqual({
       movedNodes: {
-        [a]: { x: 40, y: 10 },
-        [b]: { x: 240, y: 10 },
-        [c]: { x: 240, y: 210 },
-        [d]: { x: 40, y: 210 },
+        [a]: { x: 37, y: 12 },
+        [b]: { x: 237, y: 12 },
+        [c]: { x: 237, y: 212 },
+        [d]: { x: 37, y: 212 },
       },
     })
     expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 }) // doc untouched until pointerup
@@ -135,20 +135,20 @@ describe('selectTool rooms', () => {
     const command = apply.mock.calls[0]![0]
     expect(command.label).toBe('Move room')
     command.do(doc)
-    expect(doc.nodes[a]!.pos).toEqual({ x: 40, y: 10 })
-    expect(doc.nodes[c]!.pos).toEqual({ x: 240, y: 210 })
+    expect(doc.nodes[a]!.pos).toEqual({ x: 37, y: 12 })
+    expect(doc.nodes[c]!.pos).toEqual({ x: 237, y: 212 })
     command.undo(doc)
     expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 })
     expect(doc.nodes[c]!.pos).toEqual({ x: 200, y: 200 })
   })
 
-  it('a room click with sub-grid jitter applies nothing', () => {
+  it('a room click under the drag threshold applies nothing', () => {
     const { doc } = docWithRoom()
     const { ctx, apply } = ctxFor(doc)
     const tool = createSelectTool()
 
     tool.onPointerDown!(at(100, 100), ctx)
-    tool.onPointerMove!(at(102, 101), ctx) // under half a grid step
+    tool.onPointerMove!(at(102, 101), ctx) // within the pick radius of the grab
     tool.onPointerUp!(at(102, 101), ctx)
 
     expect(apply).not.toHaveBeenCalled()
@@ -178,16 +178,16 @@ describe('selectTool node drag', () => {
     return Object.keys(doc.nodes)
   }
 
-  it('drags a vertex: snapped preview, one command on pointerup', () => {
+  it('drags a vertex: free preview off any guide, one command on pointerup', () => {
     const { doc } = docWithWall()
     const { ctx, apply } = ctxFor(doc)
     const nodeA = nodeIds(doc)[0]!
     const tool = createSelectTool()
 
     tool.onPointerDown!(at(1, -2), ctx) // grab near the (0,0) vertex
-    tool.onPointerMove!(at(48, 33), ctx)
+    tool.onPointerMove!(at(48, 33), ctx) // far from the other vertex's row/column
 
-    expect(tool.preview).toEqual({ movedNodes: { [nodeA]: { x: 50, y: 30 } } })
+    expect(tool.preview).toEqual({ movedNodes: { [nodeA]: { x: 48, y: 33 } } })
     expect(doc.nodes[nodeA]!.pos).toEqual({ x: 0, y: 0 }) // doc untouched until pointerup
 
     tool.onPointerUp!(at(48, 33), ctx)
@@ -195,10 +195,25 @@ describe('selectTool node drag', () => {
     expect(apply).toHaveBeenCalledTimes(1)
     const command = apply.mock.calls[0]![0]
     command.do(doc)
-    expect(doc.nodes[nodeA]!.pos).toEqual({ x: 50, y: 30 })
+    expect(doc.nodes[nodeA]!.pos).toEqual({ x: 48, y: 33 })
     command.undo(doc)
     expect(doc.nodes[nodeA]!.pos).toEqual({ x: 0, y: 0 })
     expect(tool.preview).toBeNull()
+  })
+
+  it('drags a vertex onto another vertex row, showing an alignment guide', () => {
+    const { doc } = docWithWall() // vertices (0,0) and (200,0)
+    const { ctx } = ctxFor(doc)
+    const nodeA = nodeIds(doc)[0]!
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(1, -2), ctx) // grab the (0,0) vertex
+    tool.onPointerMove!(at(60, 3), ctx) // 3cm off the far vertex's y=0 row → snaps flat
+
+    expect(tool.preview).toEqual({
+      movedNodes: { [nodeA]: { x: 60, y: 0 } },
+      guides: [{ kind: 'horizontal', y: 0 }],
+    })
   })
 
   it('grabbing a vertex selects it', () => {
@@ -217,7 +232,7 @@ describe('selectTool node drag', () => {
     const tool = createSelectTool()
 
     tool.onPointerDown!(at(1, -2), ctx)
-    tool.onPointerMove!(at(2, -1), ctx) // jitter under half a grid step
+    tool.onPointerMove!(at(2, -1), ctx) // within the pick radius of the grab
     tool.onPointerUp!(at(2, -1), ctx)
 
     expect(apply).not.toHaveBeenCalled()
@@ -256,9 +271,12 @@ describe('selectTool node drag', () => {
       mergeTarget: target,
     })
 
-    // out of reach: back to plain grid dragging, highlight gone
+    // out of reach: back to free dragging (aligned to the y=0 row), highlight gone
     tool.onPointerMove!(at(249, 1), ctx)
-    expect(tool.preview).toEqual({ movedNodes: { [dragged]: { x: 250, y: 0 } } })
+    expect(tool.preview).toEqual({
+      movedNodes: { [dragged]: { x: 249, y: 0 } },
+      guides: [{ kind: 'horizontal', y: 0 }],
+    })
 
     tool.onPointerMove!(at(299, 1), ctx)
     tool.onPointerUp!(at(299, 1), ctx)
@@ -273,15 +291,15 @@ describe('selectTool node drag', () => {
     expect(doc.nodes[dragged]!.pos).toEqual({ x: 200, y: 0 })
   })
 
-  it('does not merge into a vertex sharing a wall, even off the grid', () => {
-    // (200, 0) is the dragged vertex's direct neighbour: snapping onto it must
-    // fall back to the grid + collapse guard instead of turning into a merge
+  it('does not merge into a vertex sharing a wall', () => {
+    // (200, 0) is the dragged vertex's direct neighbour: its row+column guides
+    // intersect on it, but the collapse guard refuses the move instead of merging
     const { doc } = docWithWall()
     const { ctx, apply } = ctxFor(doc)
     const tool = createSelectTool()
 
     tool.onPointerDown!(at(1, -2), ctx)
-    tool.onPointerMove!(at(198, 2), ctx) // in reach of the neighbour, off-grid
+    tool.onPointerMove!(at(198, 2), ctx) // in reach of the neighbour
 
     expect(tool.preview).toBeNull() // no merge preview, move refused
 
@@ -305,7 +323,7 @@ describe('selectTool node drag', () => {
 })
 
 describe('selectTool wall drag', () => {
-  it('drags the whole wall: snapped delta, both endpoints in one command', () => {
+  it('drags the whole wall: free delta with no other vertices, both ends in one command', () => {
     const { doc, wallId } = docWithWall()
     const { ctx, select, apply } = ctxFor(doc)
     const [a, b] = Object.keys(doc.nodes) as [string, string]
@@ -314,9 +332,9 @@ describe('selectTool wall drag', () => {
     tool.onPointerDown!(at(100, 3), ctx) // wall body, away from both vertices
     expect(select).toHaveBeenCalledWith({ kind: 'wall', id: wallId })
 
-    tool.onPointerMove!(at(102, 51), ctx) // raw delta (2,48) -> snapped (0,50)
+    tool.onPointerMove!(at(102, 51), ctx) // raw delta (2,48); nothing to align to
     expect(tool.preview).toEqual({
-      movedNodes: { [a]: { x: 0, y: 50 }, [b]: { x: 200, y: 50 } },
+      movedNodes: { [a]: { x: 2, y: 48 }, [b]: { x: 202, y: 48 } },
     })
     expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 }) // doc untouched until pointerup
 
@@ -325,20 +343,20 @@ describe('selectTool wall drag', () => {
     expect(apply).toHaveBeenCalledTimes(1)
     const command = apply.mock.calls[0]![0]
     command.do(doc)
-    expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 50 })
-    expect(doc.nodes[b]!.pos).toEqual({ x: 200, y: 50 })
+    expect(doc.nodes[a]!.pos).toEqual({ x: 2, y: 48 })
+    expect(doc.nodes[b]!.pos).toEqual({ x: 202, y: 48 })
     command.undo(doc)
     expect(doc.nodes[a]!.pos).toEqual({ x: 0, y: 0 })
     expect(doc.nodes[b]!.pos).toEqual({ x: 200, y: 0 })
   })
 
-  it('a click with sub-grid jitter applies nothing', () => {
+  it('a click under the drag threshold applies nothing', () => {
     const { doc } = docWithWall()
     const { ctx, apply } = ctxFor(doc)
     const tool = createSelectTool()
 
     tool.onPointerDown!(at(100, 3), ctx)
-    tool.onPointerMove!(at(102, 4), ctx) // under half a grid step
+    tool.onPointerMove!(at(102, 4), ctx) // within the pick radius of the grab
     tool.onPointerUp!(at(102, 4), ctx)
 
     expect(apply).not.toHaveBeenCalled()

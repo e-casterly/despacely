@@ -133,6 +133,38 @@ describe('resolveSnap — soft angular snap', () => {
   })
 })
 
+describe('resolveSnap — exclude / snapToNodes (drag options)', () => {
+  it('excludes given vertices from both node snap and alignment', () => {
+    const doc = docWith({ x: 100, y: 0 }, { x: 500, y: 300 })
+    const excluded = Object.keys(doc.nodes)[0]! // the (100,0) vertex
+
+    // without excluding, this would snap onto (100,0)
+    const result = resolveSnap(doc, { x: 101, y: 1 }, { anchor: null, tol: TOL, exclude: [excluded] })
+
+    expect(result.nodeId).toBeUndefined()
+    expect(result.point).toEqual({ x: 101, y: 1 }) // nothing left to align to
+  })
+
+  it('snapToNodes:false skips vertex coincidence but keeps alignment guides', () => {
+    const doc = docWith({ x: 100, y: 900 })
+
+    const result = resolveSnap(doc, { x: 102, y: 250 }, { anchor: null, tol: TOL, snapToNodes: false })
+
+    expect(result.nodeId).toBeUndefined()
+    expect(result.point).toEqual({ x: 100, y: 250 }) // still rides the column
+    expect(result.guides).toEqual([{ kind: 'vertical', x: 100 }])
+  })
+
+  it('snapToNodes:false does not land exactly on a nearby vertex', () => {
+    const doc = docWith({ x: 100, y: 0 })
+
+    const onNode = resolveSnap(doc, { x: 101, y: 1 }, { anchor: null, tol: TOL, snapToNodes: false })
+    // aligns to the vertex's row and column, but is not reported as a vertex snap
+    expect(onNode.nodeId).toBeUndefined()
+    expect(onNode.point).toEqual({ x: 100, y: 0 })
+  })
+})
+
 describe('resolveSnap — axis meets alignment', () => {
   it('extends a vertical axis to a horizontal guide, forming a corner', () => {
     // anchor at origin, another corner at y=200; a near-vertical drag should

@@ -33,6 +33,14 @@ export interface SnapOptions {
   angleStep?: number
   /** optional grid fallback (cm) used only when nothing else snaps; off (null) by default. */
   grid?: number | null
+  /** vertices to ignore as snap targets (e.g. the ones being dragged). */
+  exclude?: Iterable<NodeId>
+  /**
+   * When false, the exact vertex-coincidence snap is skipped and only guides
+   * shape the point — used by drags, where landing on a vertex means merge (a
+   * separate path), not a silent overlap. Defaults to true (the wall tool).
+   */
+  snapToNodes?: boolean
 }
 
 /** A line as base point + unit direction, plus the guide it renders as. */
@@ -81,12 +89,15 @@ function intersect(c1: Candidate, c2: Candidate): Vec2 | null {
 export function resolveSnap(doc: SceneDocument, raw: Vec2, opts: SnapOptions): SnapResult {
   const { anchor, tol } = opts
   const angleStep = opts.angleStep ?? SNAP_ANGLE_STEP
+  const exclude = new Set(opts.exclude ?? [])
 
   // 1. an existing vertex is an exact snap and beats every soft constraint
-  const node = nodeAt(doc, raw, tol)
-  if (node) return { point: { ...node.pos }, guides: [], nodeId: node.id }
+  if (opts.snapToNodes !== false) {
+    const node = nodeAt(doc, raw, tol)
+    if (node && !exclude.has(node.id)) return { point: { ...node.pos }, guides: [], nodeId: node.id }
+  }
 
-  const candidates = collectCandidates(doc, raw, anchor, tol, angleStep)
+  const candidates = collectCandidates(doc, raw, anchor, tol, angleStep, exclude)
   if (candidates.length === 0) {
     return { point: opts.grid ? snapToGrid(raw, opts.grid) : { ...raw }, guides: [] }
   }
@@ -116,6 +127,7 @@ function collectCandidates(
   anchor: Vec2 | null,
   tol: number,
   angleStep: number,
+  exclude: Set<NodeId>,
 ): Candidate[] {
   const out: Candidate[] = []
 
@@ -125,6 +137,7 @@ function collectCandidates(
   let hy: number | null = null
   let hDist = tol
   for (const n of Object.values(doc.nodes)) {
+    if (exclude.has(n.id)) continue
     const dx = Math.abs(n.pos.x - raw.x)
     if (dx <= vDist) {
       vDist = dx

@@ -3,9 +3,6 @@ import { resolveSnap, type Guide } from '../domain/snapping'
 import type { Vec2 } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolOverlay } from './types'
 
-/** Grid step (cm); still used by the select tool's drag snapping. */
-export const WALL_SNAP = 10
-
 function samePoint(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y
 }

@@ -52,7 +52,7 @@ describe('wallTool', () => {
 
   it('snaps onto an existing vertex, closing back onto it', () => {
     const tool = createWallTool()
-    const { doc, ctx } = setup()
+    const { ctx } = setup()
 
     tool.onPointerDown!(down(0, 0).input, ctx)
     tool.onPointerDown!(down(0, 200).input, ctx) // vertical wall, node at (0,200)
