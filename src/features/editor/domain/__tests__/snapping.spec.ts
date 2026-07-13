@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, createEmptyDocument } from '../operations'
+import { addNode, addWall, createEmptyDocument } from '../operations'
 import { resolveSnap, SNAP_ANGLE_STEP } from '../snapping'
 import type { SceneDocument, Vec2 } from '../types'
 
@@ -162,6 +162,87 @@ describe('resolveSnap — exclude / snapToNodes (drag options)', () => {
     // aligns to the vertex's row and column, but is not reported as a vertex snap
     expect(onNode.nodeId).toBeUndefined()
     expect(onNode.point).toEqual({ x: 100, y: 0 })
+  })
+})
+
+describe('resolveSnap — wall edge (snapToEdges)', () => {
+  it('snaps onto a wall body and reports the wall id', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b)
+
+    const result = resolveSnap(doc, { x: 100, y: 3 }, { anchor: null, tol: TOL, snapToEdges: true })
+
+    expect(result.point).toEqual({ x: 100, y: 0 })
+    expect(result.edgeWallId).toBe(wall.id)
+    expect(result.guides).toContainEqual({ kind: 'edge', a: { x: 0, y: 0 }, b: { x: 200, y: 0 } })
+  })
+
+  it('is off by default: a slanted wall does not attract without the flag', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 100 })
+    const wall = addWall(doc, a, b)
+
+    const off = resolveSnap(doc, { x: 52, y: 48 }, { anchor: null, tol: TOL })
+    expect(off.edgeWallId).toBeUndefined()
+    expect(off.point).toEqual({ x: 52, y: 48 }) // no alignment on a diagonal → free
+
+    const on = resolveSnap(doc, { x: 52, y: 48 }, { anchor: null, tol: TOL, snapToEdges: true })
+    expect(on.edgeWallId).toBe(wall.id)
+    expect(on.point.x).toBeCloseTo(50) // perpendicular projection onto the diagonal
+    expect(on.point.y).toBeCloseTo(50)
+  })
+
+  it('a vertex still beats an edge near a wall end', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    addWall(doc, a, b)
+
+    const result = resolveSnap(doc, { x: 2, y: 2 }, { anchor: null, tol: TOL, snapToEdges: true })
+
+    expect(result.nodeId).toBe(a)
+    expect(result.edgeWallId).toBeUndefined()
+    expect(result.point).toEqual({ x: 0, y: 0 })
+  })
+
+  it('meets a wall at the axis lock — the room-subdivision case', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b)
+
+    // a partition drawn from (100,150) straight up meets the wall at (100,0)
+    const result = resolveSnap(
+      doc,
+      { x: 100, y: 3 },
+      { anchor: { x: 100, y: 150 }, tol: TOL, snapToEdges: true },
+    )
+
+    expect(result.point.x).toBeCloseTo(100)
+    expect(result.point.y).toBeCloseTo(0)
+    expect(result.edgeWallId).toBe(wall.id)
+    expect(result.guides.some((g) => g.kind === 'axis')).toBe(true)
+    expect(result.guides).toContainEqual({ kind: 'edge', a: { x: 0, y: 0 }, b: { x: 200, y: 0 } })
+  })
+
+  it('does not edge-snap a wall whose endpoint is excluded', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 100 })
+    addWall(doc, a, b)
+
+    const result = resolveSnap(doc, { x: 52, y: 48 }, {
+      anchor: null,
+      tol: TOL,
+      snapToEdges: true,
+      exclude: [a],
+    })
+
+    expect(result.edgeWallId).toBeUndefined()
+    expect(result.point).toEqual({ x: 52, y: 48 })
   })
 })
 

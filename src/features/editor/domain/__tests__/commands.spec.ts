@@ -13,8 +13,8 @@ import {
   RemoveWallCommand,
   SetWallPropsCommand,
 } from '../commands'
-import { addNode, addWall, createEmptyDocument } from '../operations'
-import { roomAt, roomKey } from '../rooms'
+import { addNode, addWall, createEmptyDocument, findWall, wallsAtNode } from '../operations'
+import { detectRooms, roomAt, roomKey } from '../rooms'
 import type { Item, SceneDocument } from '../types'
 
 function makeItem(id = 'i1'): Item {
@@ -117,6 +117,69 @@ describe('AddWallCommand', () => {
 
     expect(doc.nodes[shared]).toBeDefined() // reused, not created -> not deleted
     expect(doc.walls).toHaveLength(1)
+  })
+
+  it('splits the wall an endpoint lands on into two halves at a T-junction', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b)
+
+    // the drawn wall ends on the middle of the existing wall's body
+    new AddWallCommand({ x: 100, y: 100 }, { x: 100, y: 0 }, { snapDist: 5 }).do(doc)
+
+    expect(doc.walls).toHaveLength(3) // two halves + the new wall
+    expect(findWall(doc, wall.id)).toBeUndefined() // the original is gone
+    const junction = Object.values(doc.nodes).find((n) => n.pos.x === 100 && n.pos.y === 0)!
+    expect(wallsAtNode(doc, junction.id)).toHaveLength(3) // T-junction
+  })
+
+  it('undoes the split, restoring the exact original wall', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b)
+    const cmd = new AddWallCommand({ x: 100, y: 100 }, { x: 100, y: 0 }, { snapDist: 5 })
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(doc.walls).toHaveLength(1)
+    expect(doc.walls[0]!.id).toBe(wall.id)
+    expect(Object.keys(doc.nodes)).toHaveLength(2) // split node + drawn node gone
+  })
+
+  it('redoes the split with the same wall and node ids', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    addWall(doc, a, b)
+    const cmd = new AddWallCommand({ x: 100, y: 100 }, { x: 100, y: 0 }, { snapDist: 5 })
+
+    cmd.do(doc)
+    const wallIds = doc.walls.map((w) => w.id).sort()
+    const nodeIds = Object.keys(doc.nodes).sort()
+
+    cmd.undo(doc)
+    cmd.do(doc) // redo
+
+    expect(doc.walls.map((w) => w.id).sort()).toEqual(wallIds)
+    expect(Object.keys(doc.nodes).sort()).toEqual(nodeIds)
+  })
+
+  it('subdivides a room by drawing a partition onto two opposite walls', () => {
+    const doc = createEmptyDocument()
+    const tl = addNode(doc, { x: 0, y: 0 })
+    const tr = addNode(doc, { x: 200, y: 0 })
+    const br = addNode(doc, { x: 200, y: 100 })
+    const bl = addNode(doc, { x: 0, y: 100 })
+    for (const [p, q] of [[tl, tr], [tr, br], [br, bl], [bl, tl]] as const) addWall(doc, p, q)
+    expect(detectRooms(doc)).toHaveLength(1)
+
+    // a partition from the middle of the top wall to the middle of the bottom wall
+    new AddWallCommand({ x: 100, y: 0 }, { x: 100, y: 100 }, { snapDist: 5 }).do(doc)
+
+    expect(detectRooms(doc)).toHaveLength(2)
   })
 })
 

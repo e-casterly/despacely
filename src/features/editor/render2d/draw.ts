@@ -3,7 +3,7 @@ import { nodeAt } from '../domain/operations'
 import type { Guide } from '../domain/snapping'
 import { detectRooms, roomKey, type Room } from '../domain/rooms'
 import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
-import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
+import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 import type { Selection, ToolOverlay } from '../tools/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
 import { computeWallGeometry, type WallFaces, type WallGeometry } from './wallJoints'
@@ -114,6 +114,12 @@ function drawGuides(
       const sy = worldToScreen(vp, { x: 0, y: guide.y }).y
       ctx.moveTo(0, sy)
       ctx.lineTo(vp.width, sy)
+    } else if (guide.kind === 'edge') {
+      // highlight the target wall along its body, not an infinite construction line
+      const a = worldToScreen(vp, guide.a)
+      const b = worldToScreen(vp, guide.b)
+      ctx.moveTo(a.x, a.y)
+      ctx.lineTo(b.x, b.y)
     } else {
       const from = worldToScreen(vp, guide.from)
       const dx = Math.cos(guide.angle)

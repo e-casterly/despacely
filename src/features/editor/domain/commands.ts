@@ -5,8 +5,12 @@ import {
   mergeNodes,
   moveItem,
   moveNode,
+  nodeAt,
+  ON_WALL_TOL,
   removeItem,
   removeWall,
+  splitWallAt,
+  wallAtPoint,
   wallsAtNode,
   type MergeReport,
   type WallOptions,
@@ -25,11 +29,20 @@ export interface Command {
   readonly label: string
 }
 
-/** Adds a wall between two points, snapping endpoints to nearby nodes. */
+/**
+ * Adds a wall between two points, snapping endpoints to nearby nodes. An
+ * endpoint that lands on the body of an existing wall splits that wall into two
+ * halves joined by the new vertex, so the drawn wall connects into a real
+ * T-junction (which rooms can form around) instead of just crossing it. The
+ * split(s) and the new wall are one history entry; the whole net change is
+ * recorded so undo/redo restore the exact same graph.
+ */
 export class AddWallCommand implements Command {
   readonly label = 'Add wall'
-  private wall?: Wall
-  private createdNodes: Node[] = []
+  private applied = false
+  private addedNodes: Node[] = []
+  private addedWalls: Wall[] = []
+  private removedWalls: Wall[] = []
 
   constructor(
     private readonly posA: Vec2,
@@ -38,25 +51,46 @@ export class AddWallCommand implements Command {
   ) {}
 
   do(doc: SceneDocument): void {
-    if (this.wall) {
-      // redo: re-insert the exact entities created the first time
-      for (const node of this.createdNodes) doc.nodes[node.id] = node
-      doc.walls.push(this.wall)
+    if (this.applied) {
+      // redo: replay the recorded net changeset (drop the split originals, then
+      // re-insert every node and wall created the first time)
+      const removed = new Set(this.removedWalls.map((w) => w.id))
+      doc.walls = doc.walls.filter((w) => !removed.has(w.id))
+      for (const node of this.addedNodes) doc.nodes[node.id] = node
+      doc.walls.push(...this.addedWalls)
       return
     }
-    const before = new Set(Object.keys(doc.nodes))
-    const wall = addWallBetween(doc, this.posA, this.posB, this.opts)
-    if (!wall) return
-    this.wall = wall
-    this.createdNodes = Object.values(doc.nodes).filter((node) => !before.has(node.id))
+    const beforeNodes = new Set(Object.keys(doc.nodes))
+    const beforeWalls = new Map(doc.walls.map((w) => [w.id, w]))
+    const snapDist = this.opts.snapDist ?? 0
+    splitUnderPoint(doc, this.posA, snapDist)
+    splitUnderPoint(doc, this.posB, snapDist)
+    addWallBetween(doc, this.posA, this.posB, this.opts)
+    this.addedNodes = Object.values(doc.nodes).filter((node) => !beforeNodes.has(node.id))
+    const afterWalls = new Set(doc.walls.map((w) => w.id))
+    this.addedWalls = doc.walls.filter((w) => !beforeWalls.has(w.id))
+    this.removedWalls = [...beforeWalls.values()].filter((w) => !afterWalls.has(w.id))
+    this.applied = true
   }
 
   undo(doc: SceneDocument): void {
-    if (!this.wall) return
-    const wallId = this.wall.id
-    doc.walls = doc.walls.filter((w) => w.id !== wallId)
-    for (const node of this.createdNodes) delete doc.nodes[node.id]
+    const added = new Set(this.addedWalls.map((w) => w.id))
+    doc.walls = doc.walls.filter((w) => !added.has(w.id))
+    for (const node of this.addedNodes) delete doc.nodes[node.id]
+    doc.walls.push(...this.removedWalls)
   }
+}
+
+/**
+ * Splits the wall under `pos` (if any) so a drawn endpoint there becomes a
+ * vertex. Skipped when the point already sits on a node — a snapped corner, or
+ * one a prior split just made — so a chained or repeated point never re-splits;
+ * a vertex beating an edge here mirrors the snap resolver's own priority.
+ */
+function splitUnderPoint(doc: SceneDocument, pos: Vec2, snapDist: number): void {
+  if (nodeAt(doc, pos, snapDist)) return
+  const wall = wallAtPoint(doc, pos, ON_WALL_TOL)
+  if (wall) splitWallAt(doc, wall.id, pos)
 }
 
 /**

@@ -9,12 +9,15 @@ import {
   docBounds,
   findItem,
   mergeNodes,
+  findWall,
   moveItem,
   moveNode,
   nodeAt,
   nodesConnected,
   removeItem,
   removeWall,
+  splitWallAt,
+  wallAtPoint,
   wallSegment,
   wallsAtNode,
 } from '../operations'
@@ -284,5 +287,62 @@ describe('items', () => {
 
     removeItem(doc, 'i1')
     expect(doc.items).toHaveLength(0)
+  })
+})
+
+describe('wallAtPoint', () => {
+  it('finds the wall a mid-body point lies on', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b)
+
+    expect(wallAtPoint(doc, { x: 100, y: 0 }, 0.5)?.id).toBe(wall.id)
+  })
+
+  it('ignores hits at the wall ends and points off the body', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    addWall(doc, a, b)
+
+    expect(wallAtPoint(doc, { x: 0, y: 0 }, 0.5)).toBeUndefined() // an endpoint, not a body point
+    expect(wallAtPoint(doc, { x: 100, y: 50 }, 0.5)).toBeUndefined() // off the body
+  })
+
+  it('skips a wall whose endpoint is excluded', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    addWall(doc, a, b)
+
+    expect(wallAtPoint(doc, { x: 100, y: 0 }, 0.5, new Set([a]))).toBeUndefined()
+  })
+})
+
+describe('splitWallAt', () => {
+  it('replaces a wall with two halves joined by a new node, inheriting props', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b, { thickness: 20, height: 300 })
+
+    const split = splitWallAt(doc, wall.id, { x: 100, y: 0 })!
+
+    expect(doc.walls).toHaveLength(2)
+    expect(findWall(doc, wall.id)).toBeUndefined() // original gone
+    const [w1, w2] = split.added
+    expect([w1.a, w1.b]).toEqual([a, split.nodeId])
+    expect([w2.a, w2.b]).toEqual([split.nodeId, b])
+    expect(doc.nodes[split.nodeId]!.pos).toEqual({ x: 100, y: 0 })
+    expect(w1.thickness).toBe(20)
+    expect(w2.height).toBe(300)
+    expect(doc.nodes[a]).toBeDefined() // endpoints kept, not GC'd
+    expect(doc.nodes[b]).toBeDefined()
+  })
+
+  it('returns undefined for a wall that no longer exists', () => {
+    const doc = createEmptyDocument()
+    expect(splitWallAt(doc, 'gone', { x: 0, y: 0 })).toBeUndefined()
   })
 })

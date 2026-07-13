@@ -1,4 +1,5 @@
-import { nodeAt } from './operations'
+import { distToSegment } from './geometry'
+import { nodeAt, ON_WALL_TOL, wallAtPoint } from './operations'
 import type { NodeId, SceneDocument, Vec2 } from './types'
 import { snap } from './units'
 
@@ -14,6 +15,7 @@ export type Guide =
   | { kind: 'vertical'; x: number }
   | { kind: 'horizontal'; y: number }
   | { kind: 'axis'; from: Vec2; angle: number }
+  | { kind: 'edge'; a: Vec2; b: Vec2 }
 
 export interface SnapResult {
   /** the resolved world point (cm) */
@@ -22,6 +24,8 @@ export interface SnapResult {
   guides: Guide[]
   /** set only when the point landed exactly on an existing vertex */
   nodeId?: NodeId
+  /** set when the point landed on a wall's body (not a vertex): that wall's id */
+  edgeWallId?: string
 }
 
 export interface SnapOptions {
@@ -41,15 +45,25 @@ export interface SnapOptions {
    * separate path), not a silent overlap. Defaults to true (the wall tool).
    */
   snapToNodes?: boolean
+  /**
+   * When true, the point may also snap onto the body of a nearby wall
+   * (perpendicular projection), reporting that wall in {@link SnapResult.edgeWallId}.
+   * Off by default; the wall tool turns it on so a drawn endpoint can land on a
+   * wall (and later split it). A vertex still wins over an edge.
+   */
+  snapToEdges?: boolean
 }
 
-/** A line as base point + unit direction, plus the guide it renders as. */
+/** A line as base point + unit direction. */
 interface Candidate {
   base: Vec2
   dir: Vec2
-  guide: Guide
+  /** the guide this constraint renders as; a wall edge only attracts, so none */
+  guide?: Guide
   /** perpendicular distance from the raw point to this line (cm) */
   dist: number
+  /** for a wall-edge candidate: the bounded segment it is clamped to */
+  seg?: { a: Vec2; b: Vec2 }
 }
 
 function sub(a: Vec2, b: Vec2): Vec2 {
@@ -97,7 +111,7 @@ export function resolveSnap(doc: SceneDocument, raw: Vec2, opts: SnapOptions): S
     if (node && !exclude.has(node.id)) return { point: { ...node.pos }, guides: [], nodeId: node.id }
   }
 
-  const candidates = collectCandidates(doc, raw, anchor, tol, angleStep, exclude)
+  const candidates = collectCandidates(doc, raw, anchor, tol, angleStep, exclude, opts.snapToEdges === true)
   if (candidates.length === 0) {
     return { point: opts.grid ? snapToGrid(raw, opts.grid) : { ...raw }, guides: [] }
   }
@@ -105,22 +119,41 @@ export function resolveSnap(doc: SceneDocument, raw: Vec2, opts: SnapOptions): S
   candidates.sort((a, b) => a.dist - b.dist)
   const primary = candidates[0]!
   let point = projectOnto(raw, primary)
-  const guides: Guide[] = [primary.guide]
+  const guides: Guide[] = primary.guide ? [primary.guide] : []
 
   // pin to the intersection with the next non-parallel constraint, if any
   for (const next of candidates.slice(1)) {
     const p = intersect(primary, next)
-    if (p) {
-      point = p
-      guides.push(next.guide)
-      break
+    if (!p) continue
+    // an edge only spans its own wall, so the crossing must stay on that segment
+    // — an intersection past a wall's end is not a real point on it
+    if (primary.seg && distToSegment(p, primary.seg.a, primary.seg.b) > tol) continue
+    if (next.seg && distToSegment(p, next.seg.a, next.seg.b) > tol) continue
+    point = p
+    if (next.guide) guides.push(next.guide)
+    break
+  }
+
+  // report the wall the resolved point lands on, whatever pulled it there — an
+  // alignment guide off the wall's own ends can pin the point onto an ortho wall
+  // without an edge candidate ever winning. Detecting on the final point (with a
+  // tight on-wall tolerance) covers both and matches what AddWallCommand will
+  // split, so the highlight shows exactly when a split would happen.
+  if (opts.snapToEdges === true) {
+    const wall = wallAtPoint(doc, point, ON_WALL_TOL, exclude)
+    if (wall) {
+      const a = doc.nodes[wall.a]!.pos
+      const b = doc.nodes[wall.b]!.pos
+      guides.push({ kind: 'edge', a: { ...a }, b: { ...b } })
+      return { point, guides, edgeWallId: wall.id }
     }
   }
 
   return { point, guides }
 }
 
-/** Alignment lines (nearest vertex sharing x or y) plus the soft axis ray. */
+/** Alignment lines (nearest vertex sharing x or y), the soft axis ray, and — when
+ *  enabled — the bodies of nearby walls. */
 function collectCandidates(
   doc: SceneDocument,
   raw: Vec2,
@@ -128,6 +161,7 @@ function collectCandidates(
   tol: number,
   angleStep: number,
   exclude: Set<NodeId>,
+  snapToEdges: boolean,
 ): Candidate[] {
   const out: Candidate[] = []
 
@@ -167,6 +201,28 @@ function collectCandidates(
       if (perp <= tol) {
         out.push({ base: anchor, dir, guide: { kind: 'axis', from: anchor, angle }, dist: perp })
       }
+    }
+  }
+
+  // wall bodies attract the point onto a nearby wall (needed for slanted walls,
+  // which have no alignment guide of their own); the wall itself is reported by
+  // wallUnderPoint on the final point, so an edge candidate carries no guide.
+  if (snapToEdges) {
+    for (const wall of doc.walls) {
+      if (exclude.has(wall.a) || exclude.has(wall.b)) continue
+      const a = doc.nodes[wall.a]?.pos
+      const b = doc.nodes[wall.b]?.pos
+      if (!a || !b) continue
+      const dist = distToSegment(raw, a, b)
+      if (dist > tol) continue
+      const len = Math.hypot(b.x - a.x, b.y - a.y)
+      if (len === 0) continue
+      out.push({
+        base: { ...a },
+        dir: { x: (b.x - a.x) / len, y: (b.y - a.y) / len },
+        dist,
+        seg: { a: { ...a }, b: { ...b } },
+      })
     }
   }
 

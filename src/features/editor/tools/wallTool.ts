@@ -31,7 +31,11 @@ export function createWallTool(): Tool {
     },
 
     onPointerDown(input: PointerInput, ctx: ToolContext) {
-      const { point } = resolveSnap(ctx.doc, input.world, { anchor: start, tol: ctx.snapDist })
+      const { point } = resolveSnap(ctx.doc, input.world, {
+        anchor: start,
+        tol: ctx.snapDist,
+        snapToEdges: true,
+      })
       if (start && !samePoint(start, point)) {
         ctx.apply(new AddWallCommand(start, point, { snapDist: ctx.snapDist }))
       }
@@ -41,7 +45,11 @@ export function createWallTool(): Tool {
     },
 
     onPointerMove(input: PointerInput, ctx: ToolContext) {
-      const result = resolveSnap(ctx.doc, input.world, { anchor: start, tol: ctx.snapDist })
+      const result = resolveSnap(ctx.doc, input.world, {
+        anchor: start,
+        tol: ctx.snapDist,
+        snapToEdges: true,
+      })
       cursor = result.point
       guides = result.guides
     },

@@ -1,3 +1,4 @@
+import { distToSegment } from './geometry'
 import type { Item, Node, NodeId, SceneDocument, Vec2, Wall } from './types'
 import { WALL_HEIGHT, WALL_THICKNESS } from './units'
 
@@ -89,6 +90,58 @@ export function addWallBetween(
 
 export function findWall(doc: SceneDocument, id: string): Wall | undefined {
   return doc.walls.find((wall) => wall.id === id)
+}
+
+/** cm: a point within this of a wall's body counts as lying on it (a mid-wall point). */
+export const ON_WALL_TOL = 0.001
+
+/**
+ * The wall whose body the point lies on (nearest within `maxDist`), or undefined.
+ * Hits at a wall's own endpoints are ignored — those are vertices, not a mid-wall
+ * point — as are walls touching an excluded node.
+ */
+export function wallAtPoint(
+  doc: SceneDocument,
+  pos: Vec2,
+  maxDist: number,
+  exclude?: Set<NodeId>,
+): Wall | undefined {
+  let best: Wall | undefined
+  let bestDist = maxDist
+  for (const wall of doc.walls) {
+    if (exclude && (exclude.has(wall.a) || exclude.has(wall.b))) continue
+    const a = doc.nodes[wall.a]?.pos
+    const b = doc.nodes[wall.b]?.pos
+    if (!a || !b) continue
+    const dist = distToSegment(pos, a, b)
+    if (dist > bestDist) continue
+    if (Math.hypot(pos.x - a.x, pos.y - a.y) <= maxDist) continue
+    if (Math.hypot(pos.x - b.x, pos.y - b.y) <= maxDist) continue
+    best = wall
+    bestDist = dist
+  }
+  return best
+}
+
+export interface WallSplit {
+  nodeId: NodeId
+  removed: Wall
+  added: [Wall, Wall]
+}
+
+/**
+ * Splits a wall at `pos`, replacing it with two halves joined by a new node that
+ * inherit its thickness and height. The endpoints stay shared, so nothing is
+ * GC'd. Returns the changeset, or undefined if the wall no longer exists.
+ */
+export function splitWallAt(doc: SceneDocument, wallId: string, pos: Vec2): WallSplit | undefined {
+  const wall = findWall(doc, wallId)
+  if (!wall) return undefined
+  const nodeId = addNode(doc, pos)
+  const opts = { thickness: wall.thickness, height: wall.height }
+  const added: [Wall, Wall] = [addWall(doc, wall.a, nodeId, opts), addWall(doc, nodeId, wall.b, opts)]
+  doc.walls = doc.walls.filter((w) => w.id !== wallId)
+  return { nodeId, removed: wall, added }
 }
 
 /** Removes a wall and garbage-collects any endpoint left with no other walls. */
