@@ -1,5 +1,6 @@
 import { pointInPolygon, polygonCentroid } from '../domain/geometry'
 import { nodeAt } from '../domain/operations'
+import type { Guide } from '../domain/snapping'
 import { detectRooms, roomKey, type Room } from '../domain/rooms'
 import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
@@ -74,6 +75,51 @@ export function render(
     drawWallLengths(ctx, vp, lengthLabelSegments(viewDoc, rooms, geometry.faces, view), palette)
     if (view.overlay?.mergeTarget) drawMergeRing(ctx, vp, viewDoc, palette, view.overlay.mergeTarget)
   })
+
+  // guides last, in screen space (like the grid) so they stay 1px-crisp on top
+  if (view.overlay?.guides?.length) drawGuides(ctx, vp, view.overlay.guides, palette)
+}
+
+/** Dash pattern (screen px) marking a guide as a construction line, not a wall. */
+const GUIDE_DASH = [4, 3]
+
+/**
+ * Snap guides: thin dashed accent lines drawn in screen space, on top of the
+ * scene. Alignment guides span the whole viewport; an axis guide is the full
+ * construction line through its anchor at the snapped angle. Directions survive
+ * world→screen unchanged because the transform is a uniform, unrotated scale.
+ */
+function drawGuides(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  guides: Guide[],
+  palette: CanvasPalette,
+): void {
+  ctx.save()
+  ctx.strokeStyle = palette.accent
+  ctx.lineWidth = 1
+  ctx.setLineDash(GUIDE_DASH)
+  const reach = vp.width + vp.height // any length that clears the viewport
+  for (const guide of guides) {
+    ctx.beginPath()
+    if (guide.kind === 'vertical') {
+      const sx = worldToScreen(vp, { x: guide.x, y: 0 }).x
+      ctx.moveTo(sx, 0)
+      ctx.lineTo(sx, vp.height)
+    } else if (guide.kind === 'horizontal') {
+      const sy = worldToScreen(vp, { x: 0, y: guide.y }).y
+      ctx.moveTo(0, sy)
+      ctx.lineTo(vp.width, sy)
+    } else {
+      const from = worldToScreen(vp, guide.from)
+      const dx = Math.cos(guide.angle)
+      const dy = Math.sin(guide.angle)
+      ctx.moveTo(from.x - dx * reach, from.y - dy * reach)
+      ctx.lineTo(from.x + dx * reach, from.y + dy * reach)
+    }
+    ctx.stroke()
+  }
+  ctx.restore()
 }
 
 /** Render-only copy of the doc with some node positions overridden. */

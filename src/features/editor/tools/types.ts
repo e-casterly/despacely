@@ -1,4 +1,5 @@
 import type { Command } from '../domain/commands'
+import type { Guide } from '../domain/snapping'
 import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 
 /** The editor's active interaction mode. 'select' is the neutral mode. */
@@ -33,6 +34,8 @@ export interface ToolOverlay {
   movedNodes?: Record<NodeId, Vec2>
   /** Ring on the vertex the dragged vertex will weld into when dropped. */
   mergeTarget?: NodeId
+  /** Snap guides the current point is aligned to, drawn as construction lines. */
+  guides?: Guide[]
 }
 
 /**
