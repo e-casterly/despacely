@@ -48,6 +48,77 @@ function inside(poly: Vec2[], p: Vec2): boolean {
   return hit
 }
 
+describe('wall faces', () => {
+  const faceLength = ([p, q]: [Vec2, Vec2]) => Math.hypot(q.x - p.x, q.y - p.y)
+
+  it('keeps both faces full length on a free-standing wall', () => {
+    const doc = makeDoc({ a: { x: 0, y: 0 }, b: { x: 200, y: 0 } }, [
+      { id: 'w', a: 'a', b: 'b', thickness: 10 },
+    ])
+
+    const faces = computeWallGeometry(doc).faces.get('w')!
+
+    expect(faces.left).toEqual([
+      { x: 0, y: 5 },
+      { x: 200, y: 5 },
+    ])
+    expect(faces.right).toEqual([
+      { x: 0, y: -5 },
+      { x: 200, y: -5 },
+    ])
+  })
+
+  it('shortens the inner face and lengthens the outer at an L-corner', () => {
+    const doc = makeDoc(
+      { a: { x: 0, y: 0 }, corner: { x: 200, y: 0 }, c: { x: 200, y: 200 } },
+      [
+        { id: 'h', a: 'a', b: 'corner', thickness: 10 },
+        { id: 'v', a: 'corner', b: 'c', thickness: 10 },
+      ],
+    )
+
+    const { faces } = computeWallGeometry(doc)
+
+    // inner seam (195,5), outer seam (205,-5)
+    expect(faces.get('h')!.left).toEqual([
+      { x: 0, y: 5 },
+      { x: 195, y: 5 },
+    ])
+    expect(faces.get('h')!.right).toEqual([
+      { x: 0, y: -5 },
+      { x: 205, y: -5 },
+    ])
+    expect(faceLength(faces.get('v')!.left)).toBeCloseTo(195)
+    expect(faceLength(faces.get('v')!.right)).toBeCloseTo(205)
+  })
+
+  it('gives every wall of a closed square a 190 inner and 210 outer face', () => {
+    const doc = makeDoc(
+      {
+        a: { x: 0, y: 0 },
+        b: { x: 200, y: 0 },
+        c: { x: 200, y: 200 },
+        d: { x: 0, y: 200 },
+      },
+      [
+        { id: 'w1', a: 'a', b: 'b', thickness: 10 },
+        { id: 'w2', a: 'b', b: 'c', thickness: 10 },
+        { id: 'w3', a: 'c', b: 'd', thickness: 10 },
+        { id: 'w4', a: 'd', b: 'a', thickness: 10 },
+      ],
+    )
+
+    const { faces } = computeWallGeometry(doc)
+
+    for (const id of ['w1', 'w2', 'w3', 'w4']) {
+      const wallFaces = faces.get(id)!
+      const lengths = [faceLength(wallFaces.left), faceLength(wallFaces.right)].sort((p, q) => p - q)
+      expect(lengths[0]).toBeCloseTo(190)
+      expect(lengths[1]).toBeCloseTo(210)
+    }
+  })
+})
+
 describe('computeWallGeometry', () => {
   it('keeps a free-ended wall a full rectangle', () => {
     const doc = makeDoc({ a: { x: 0, y: 0 }, b: { x: 100, y: 0 } }, [

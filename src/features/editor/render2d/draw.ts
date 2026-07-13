@@ -5,7 +5,7 @@ import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { Selection, ToolOverlay } from '../tools/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
-import { computeWallGeometry } from './wallJoints'
+import { computeWallGeometry, type WallFaces, type WallGeometry } from './wallJoints'
 
 export interface CanvasPalette {
   background: string
@@ -62,12 +62,16 @@ export function render(
   // rooms derive from viewDoc: a drag preview moves them live, while the
   // uncommitted ghost wall never closes one
   const rooms = detectRooms(viewDoc)
+  // one miter pass per repaint, shared by the wall fills and the face labels
+  // (selection and ghost never coexist, so the ghost never skews label faces)
+  const geometry = computeWallGeometry(ghost?.doc ?? viewDoc)
   withWorldTransform(ctx, vp, dpr, () => {
     drawRooms(ctx, rooms, palette, selectedRoomKey)
-    drawWalls(ctx, ghost?.doc ?? viewDoc, palette, selectedWallId, ghost?.ghostId ?? null)
+    drawWalls(ctx, ghost?.doc ?? viewDoc, geometry, palette, selectedWallId, ghost?.ghostId ?? null)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
     drawRoomLabels(ctx, vp, rooms, palette)
+    drawWallLengths(ctx, vp, lengthLabelSegments(viewDoc, rooms, geometry.faces, view), palette)
     if (view.overlay?.mergeTarget) drawMergeRing(ctx, vp, viewDoc, palette, view.overlay.mergeTarget)
   })
 }
@@ -239,6 +243,116 @@ function drawRoomLabels(
   }
 }
 
+/** Wall length label: constant screen size, slightly smaller than area labels. */
+const WALL_LENGTH_FONT_PX = 11
+/** Screen gap between the wall face and its length label. */
+const WALL_LENGTH_GAP_PX = 6
+
+/** A measured segment to label with its length. */
+interface LengthSegment {
+  a: Vec2
+  b: Vec2
+  /** extra world offset past the measured line (the ghost measures its axis) */
+  clearance: number
+  /** hide the label when it is wider than the wall; the ghost always shows */
+  mustFit: boolean
+}
+
+/**
+ * Length labels appear only in interactive contexts, and all but the ghost
+ * measure mitered faces, not axes: the ghost shows its axis (joints are not
+ * final until commit, and snapping works on axes), the selected wall shows
+ * both faces — each labelled on its own side — and the selected room shows
+ * the room-facing face of every contour wall. Segments are ordered so their
+ * (-dy, dx) normal points away from the wall body.
+ */
+function lengthLabelSegments(
+  doc: SceneDocument,
+  rooms: Room[],
+  faces: Map<string, WallFaces>,
+  view: RenderView,
+): LengthSegment[] {
+  const selection = view.selection
+  const segments: LengthSegment[] = []
+  if (view.overlay?.ghostWall) {
+    segments.push({ ...view.overlay.ghostWall, clearance: WALL_THICKNESS / 2, mustFit: false })
+  }
+  if (selection?.kind === 'wall') {
+    const face = faces.get(selection.id)
+    if (face) {
+      segments.push({ a: face.left[0], b: face.left[1], clearance: 0, mustFit: true })
+      segments.push({ a: face.right[1], b: face.right[0], clearance: 0, mustFit: true })
+    }
+  }
+  if (selection?.kind === 'room') {
+    const room = rooms.find((r) => roomKey(r) === selection.id)
+    if (room) {
+      const pair = (a: NodeId, b: NodeId) => (a < b ? `${a}:${b}` : `${b}:${a}`)
+      const byPair = new Map(doc.walls.map((w) => [pair(w.a, w.b), w]))
+      for (let i = 0; i < room.nodeIds.length; i++) {
+        const from = room.nodeIds[i]!
+        const to = room.nodeIds[(i + 1) % room.nodeIds.length]!
+        const wall = byPair.get(pair(from, to))
+        const face = wall && faces.get(wall.id)
+        if (!face) continue
+        // the room lies on the (-dy, dx) side of from→to, so that side's face,
+        // oriented along from→to, is the interior one
+        const seg = wall!.a === from ? face.left : ([face.right[1], face.right[0]] as const)
+        segments.push({ a: seg[0], b: seg[1], clearance: 0, mustFit: true })
+      }
+    }
+  }
+  return segments
+}
+
+/**
+ * Writes each segment's length (cm, same rounding as the inspector) along it
+ * at its midpoint, offset to the segment's (-dy, dx) side — into the room for
+ * contour faces. Text flips to stay upright.
+ */
+function drawWallLengths(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  segments: LengthSegment[],
+  palette: CanvasPalette,
+): void {
+  if (segments.length === 0) return
+  const fontSize = WALL_LENGTH_FONT_PX / vp.zoom
+  ctx.font = `${fontSize}px ${ROOM_LABEL_FONT}`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = palette.accent
+  for (const seg of segments) {
+    const dx = seg.b.x - seg.a.x
+    const dy = seg.b.y - seg.a.y
+    const len = Math.hypot(dx, dy)
+    if (len === 0) continue
+    const text = `${Math.round(len * 10) / 10} cm`
+    if (seg.mustFit && ctx.measureText(text).width > len * 0.9) continue
+    const offset = seg.clearance + (WALL_LENGTH_GAP_PX + WALL_LENGTH_FONT_PX / 2) / vp.zoom
+    const x = (seg.a.x + seg.b.x) / 2 - (dy / len) * offset
+    const y = (seg.a.y + seg.b.y) / 2 + (dx / len) * offset
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(uprightAngle(dx, dy))
+    ctx.fillText(text, 0, 0)
+    ctx.restore()
+  }
+}
+
+/**
+ * Rotation for a label along (dx, dy), in the drawing convention: horizontal
+ * text runs left-to-right and vertical text bottom-to-top, whichever way the
+ * segment points — so the two faces of one wall always read the same way.
+ * Exported for tests only.
+ */
+export function uprightAngle(dx: number, dy: number): number {
+  const angle = Math.atan2(dy, dx)
+  if (angle >= Math.PI / 2) return angle - Math.PI
+  if (angle < -Math.PI / 2) return angle + Math.PI
+  return angle
+}
+
 /**
  * Each wall is one filled polygon, mitered at shared nodes so neighbours tile
  * without overlap or notch; too-sharp corners get a flat bevel (see wallJoints).
@@ -248,11 +362,12 @@ function drawRoomLabels(
 function drawWalls(
   ctx: CanvasRenderingContext2D,
   doc: SceneDocument,
+  geometry: WallGeometry,
   palette: CanvasPalette,
   selectedWallId: string | null,
   ghostId: string | null,
 ): void {
-  const { polygons } = computeWallGeometry(doc)
+  const { polygons } = geometry
   const isFront = (id: string): boolean => id === selectedWallId || id === ghostId
 
   const front: string[] = []

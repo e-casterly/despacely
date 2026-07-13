@@ -30,6 +30,15 @@ const MITER_LIMIT = 4
 export interface WallGeometry {
   /** One filled polygon per wall id, end caps (seams or butts) already applied. */
   polygons: Map<string, Vec2[]>
+  /** Per wall id: its two mitered side faces, for face-length dimensioning. */
+  faces: Map<string, WallFaces>
+}
+
+/** A wall's two long faces after mitering, each in a→b order;
+ * 'left' lies on the (-dy, dx) side of the wall's a→b axis. */
+export interface WallFaces {
+  left: [Vec2, Vec2]
+  right: [Vec2, Vec2]
 }
 
 /** A wall as seen leaving one of its nodes. */
@@ -101,11 +110,14 @@ export function computeWallGeometry(doc: SceneDocument): WallGeometry {
   }
 
   const polygons = new Map<string, Vec2[]>()
+  const faces = new Map<string, WallFaces>()
   for (const wall of doc.walls) {
-    const poly = wallPolygon(doc, wall, caps.get(wall.id))
-    if (poly) polygons.set(wall.id, poly)
+    const built = wallPolygon(doc, wall, caps.get(wall.id))
+    if (!built) continue
+    polygons.set(wall.id, built.polygon)
+    faces.set(wall.id, built.faces)
   }
-  return { polygons }
+  return { polygons, faces }
 }
 
 /**
@@ -117,7 +129,7 @@ function wallPolygon(
   doc: SceneDocument,
   wall: Wall,
   perNode: Map<NodeId, Vec2[]> | undefined,
-): Vec2[] | null {
+): { polygon: Vec2[]; faces: WallFaces } | null {
   const posA = doc.nodes[wall.a]?.pos
   const posB = doc.nodes[wall.b]?.pos
   if (!posA || !posB) return null
@@ -136,7 +148,15 @@ function wallPolygon(
     addScaled(posB, leftNormal, -halfThickness),
   ]
 
-  return cleanPolygon([...bCap, ...aCap], [posA, posB])
+  return {
+    polygon: cleanPolygon([...bCap, ...aCap], [posA, posB]),
+    // caps run [right, (tip), left] in each node's outgoing frame; the B frame
+    // is flipped, so its first entry sits on the wall's left side in a→b terms
+    faces: {
+      left: [aCap[aCap.length - 1]!, bCap[0]!],
+      right: [aCap[0]!, bCap[bCap.length - 1]!],
+    },
+  }
 }
 
 /** Arms touching each node, sorted CCW by the angle of their outgoing direction. */
