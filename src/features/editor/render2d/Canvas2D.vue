@@ -32,6 +32,13 @@ function currentTool(): Tool | undefined {
   return tools[activeTool]
 }
 
+// the active tool's live text entry (e.g. a wall length being typed); mirrored
+// into a ref so the chip renders and EditorView can defer its own key handling
+const textEntry = ref<string | null>(null)
+function syncTextEntry() {
+  textEntry.value = currentTool()?.textEntry?.value ?? null
+}
+
 /** pointer pick/snap radius: ~10 screen px expressed in world cm */
 const SNAP_PX = 10
 function toolContext(): ToolContext {
@@ -137,6 +144,7 @@ function onPointerDown(event: PointerEvent) {
     // capture so drags keep receiving move/up outside the canvas
     canvas.value?.setPointerCapture(event.pointerId)
     tool.onPointerDown(pointerInput(event), toolContext())
+    syncTextEntry() // committing a point clears any pending length
     requestRepaint()
   }
 }
@@ -197,14 +205,30 @@ defineExpose({
   zoomIn: () => zoomStep(BUTTON_ZOOM),
   zoomOut: () => zoomStep(1 / BUTTON_ZOOM),
   zoomToFit: fitContent,
+  // true while a tool is capturing typed text, so EditorView leaves those keys alone
+  isCapturingText: () => textEntry.value !== null,
 })
 
 function onKeyDown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+
+  // give the active tool first refusal on the key (e.g. wall-length entry); when
+  // it consumes it, EditorView defers via isCapturingText, so no double handling
+  const tool = currentTool()
+  if (tool?.onKey?.(event.key, toolContext())) {
+    event.preventDefault()
+    syncTextEntry()
+    requestRepaint()
+    return
+  }
+
   if (event.code === 'Space' && !event.repeat) spaceHeld.value = true
   // EditorView switches Esc back to select; when select is already active
   // the tool watch won't fire, so cancel any in-progress drag here too
   if (event.key === 'Escape') {
     currentTool()?.cancel?.()
+    syncTextEntry()
     requestRepaint()
   }
 }
@@ -224,6 +248,7 @@ watch(
     if (prev) tools[prev]?.cancel?.()
     // leaving select mode drops the highlight so it doesn't linger while drawing
     if (next !== 'select') editor.select(null)
+    syncTextEntry()
     requestRepaint()
   },
 )
@@ -266,5 +291,14 @@ onBeforeUnmount(() => {
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
     />
+
+    <div
+      v-if="textEntry !== null"
+      class="pointer-events-none absolute bottom-16 left-1/2 flex -translate-x-1/2 items-baseline gap-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm shadow-sm"
+    >
+      <span class="text-text-muted">Length</span>
+      <span class="font-medium tabular-nums text-text">{{ textEntry }}</span>
+      <span class="text-text-muted">cm</span>
+    </div>
   </div>
 </template>

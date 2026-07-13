@@ -32,6 +32,9 @@ function onPageHide() {
 function onKeyDown(event: KeyboardEvent) {
   const target = event.target as HTMLElement
   if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+  // while a tool is capturing typed text (e.g. a wall length), it owns
+  // Backspace/Enter/Esc — leave them alone so we don't delete or drop the chain
+  if (canvas.value?.isCapturingText()) return
 
   if (event.key === 'Escape') {
     activeTool.value = 'select'

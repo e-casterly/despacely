@@ -49,9 +49,17 @@ export interface ToolOverlay {
 export interface Tool {
   readonly id: ToolId
   readonly preview: ToolOverlay | null
+  /**
+   * The tool's live text entry (e.g. a wall length being typed), or null when it
+   * isn't capturing keys. While non-null the tool owns digit/Backspace/Enter/Esc,
+   * so the rest of the app must leave those keys alone.
+   */
+  readonly textEntry?: { value: string } | null
   onPointerDown?(input: PointerInput, ctx: ToolContext): void
   onPointerMove?(input: PointerInput, ctx: ToolContext): void
   onPointerUp?(input: PointerInput, ctx: ToolContext): void
+  /** Feeds a key to the tool; returns true when the tool consumed it. */
+  onKey?(key: string, ctx: ToolContext): boolean
   /** cancels any in-progress interaction (Esc, switching tools) */
   cancel?(): void
 }

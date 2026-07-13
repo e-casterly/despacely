@@ -104,3 +104,86 @@ describe('wallTool', () => {
     expect(tool.preview).toBeNull()
   })
 })
+
+describe('wallTool — length entry', () => {
+  it('locks the segment length to a typed number along the cursor direction', () => {
+    const tool = createWallTool()
+    const { ctx } = setup()
+
+    tool.onPointerDown!(down(0, 0).input, ctx)
+    tool.onPointerMove!(down(200, 0).input, ctx) // direction +x (axis-locked)
+    tool.onKey!('1', ctx)
+    tool.onKey!('5', ctx)
+    tool.onKey!('0', ctx)
+
+    expect(tool.textEntry).toEqual({ value: '150' })
+    expect(tool.preview).toMatchObject({ ghostWall: { a: { x: 0, y: 0 }, b: { x: 150, y: 0 } } })
+  })
+
+  it('commits at the typed length on Enter and advances the chain', () => {
+    const tool = createWallTool()
+    const { doc, ctx, apply } = setup()
+
+    tool.onPointerDown!(down(0, 0).input, ctx)
+    tool.onPointerMove!(down(200, 0).input, ctx)
+    tool.onKey!('1', ctx)
+    tool.onKey!('5', ctx)
+    tool.onKey!('0', ctx)
+    tool.onKey!('Enter', ctx)
+
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(wallSegment(doc, doc.walls[0]!)).toEqual({ a: { x: 0, y: 0 }, b: { x: 150, y: 0 } })
+    expect(tool.textEntry).toBeNull() // buffer cleared, chain continues from (150,0)
+  })
+
+  it('edits the buffer with Backspace', () => {
+    const tool = createWallTool()
+    const { ctx } = setup()
+
+    tool.onPointerDown!(down(0, 0).input, ctx)
+    tool.onPointerMove!(down(200, 0).input, ctx)
+    tool.onKey!('3', ctx)
+    tool.onKey!('0', ctx)
+    tool.onKey!('0', ctx)
+    tool.onKey!('Backspace', ctx)
+
+    expect(tool.textEntry).toEqual({ value: '30' })
+    expect(tool.preview).toMatchObject({ ghostWall: { b: { x: 30, y: 0 } } })
+  })
+
+  it('clears the number on the first Escape without ending the chain', () => {
+    const tool = createWallTool()
+    const { ctx } = setup()
+
+    tool.onPointerDown!(down(0, 0).input, ctx)
+    tool.onPointerMove!(down(200, 0).input, ctx)
+    tool.onKey!('9', ctx)
+
+    expect(tool.onKey!('Escape', ctx)).toBe(true) // consumes it: clears the number
+    expect(tool.textEntry).toBeNull()
+    expect(tool.preview).toMatchObject({ ghostWall: { b: { x: 200, y: 0 } } }) // back to the cursor
+    expect(tool.onKey!('Escape', ctx)).toBe(false) // now a bare Esc, free for ending the chain
+  })
+
+  it('ignores keys before a chain has started', () => {
+    const tool = createWallTool()
+    const { ctx } = setup()
+
+    expect(tool.onKey!('5', ctx)).toBe(false)
+    expect(tool.textEntry).toBeNull()
+  })
+
+  it('accepts a decimal point', () => {
+    const tool = createWallTool()
+    const { ctx } = setup()
+
+    tool.onPointerDown!(down(0, 0).input, ctx)
+    tool.onPointerMove!(down(200, 0).input, ctx)
+    tool.onKey!('2', ctx)
+    tool.onKey!('.', ctx)
+    tool.onKey!('5', ctx)
+
+    expect(tool.textEntry).toEqual({ value: '2.5' })
+    expect(tool.preview).toMatchObject({ ghostWall: { b: { x: 2.5, y: 0 } } })
+  })
+})
