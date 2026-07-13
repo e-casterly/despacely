@@ -7,7 +7,7 @@ export const SNAP_ANGLE_STEP = Math.PI / 4
 
 /**
  * A snap constraint that both shaped the resolved point and can be drawn as a
- * guide line while the tool holds it. `vertical`/`horizontal` are infinite
+ * guideline while the tool holds it. `vertical`/`horizontal` are infinite
  * alignment lines through an existing vertex; `axis` is a ray from the anchor.
  */
 export type Guide =
