@@ -13,12 +13,25 @@ function samePoint(a: Vec2, b: Vec2): boolean {
 }
 
 /**
+ * Snaps the far corner to a square about the anchor: the side follows the larger
+ * of the two deltas, so the square grows to reach the cursor's furthest axis and
+ * keeps the drag direction on each axis.
+ */
+function squareCorner(anchor: Vec2, corner: Vec2): Vec2 {
+  const dx = corner.x - anchor.x
+  const dy = corner.y - anchor.y
+  const side = Math.max(Math.abs(dx), Math.abs(dy))
+  return { x: anchor.x + Math.sign(dx) * side, y: anchor.y + Math.sign(dy) * side }
+}
+
+/**
  * Rectangle room drawing: press at one corner, drag to the opposite corner,
  * release. Both corners resolve through {@link resolveSnap} — snapping to
  * existing vertices and to alignment guides off other vertices, but with no 45°
  * axis ray (the far corner of a box isn't a direction off the first). The four
  * edges commit as a single {@link AddRoomCommand}, which detectRooms then reads
- * as a room, so the whole room draws and undoes in one step.
+ * as a room, so the whole room draws and undoes in one step. Holding Shift
+ * constrains the rectangle to a square (live — releasing Shift frees it again).
  *
  * A gesture that stays within the snap radius on either side is a stray click,
  * not a room: it previews nothing and commits nothing.
@@ -60,8 +73,15 @@ export function createRoomTool(): Tool {
       snapDist = ctx.snapDist
       if (!start) return
       const result = resolveSnap(ctx.doc, input.world, { anchor: null, tol: ctx.snapDist })
-      corner = result.point
-      guides = result.guides
+      // Shift constrains to a square; the constraint replaces the alignment
+      // guides (the corner no longer sits on them)
+      if (input.shift) {
+        corner = squareCorner(start, result.point)
+        guides = []
+      } else {
+        corner = result.point
+        guides = result.guides
+      }
     },
 
     onPointerUp(_input: PointerInput, ctx: ToolContext) {

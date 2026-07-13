@@ -11,8 +11,8 @@ function setup() {
   return { doc, ctx, apply }
 }
 
-function at(x: number, y: number) {
-  return { world: { x, y }, shift: false }
+function at(x: number, y: number, shift = false) {
+  return { world: { x, y }, shift }
 }
 
 describe('roomTool', () => {
@@ -102,6 +102,61 @@ describe('roomTool', () => {
 
     const overlay = tool.preview!
     expect(overlay.ghostRoom![2]).toEqual({ x: 200, y: 100 })
+  })
+
+  it('constrains to a square while shift is held, using the larger delta', () => {
+    const tool = createRoomTool()
+    const { ctx } = setup()
+
+    tool.onPointerDown!(at(0, 0), ctx)
+    tool.onPointerMove!(at(200, 50, true), ctx) // shift → square of side 200, no guides
+
+    expect(tool.preview).toEqual({
+      ghostRoom: [
+        { x: 0, y: 0 },
+        { x: 200, y: 0 },
+        { x: 200, y: 200 },
+        { x: 0, y: 200 },
+      ],
+      guides: [],
+    })
+  })
+
+  it('commits a square room on a shift drag, following the drag direction', () => {
+    const tool = createRoomTool()
+    const { doc, ctx, apply } = setup()
+
+    tool.onPointerDown!(at(0, 0), ctx)
+    tool.onPointerMove!(at(-100, -30, true), ctx) // square toward the upper-left, side 100
+    tool.onPointerUp!(at(-100, -30, true), ctx)
+
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(doc.walls).toHaveLength(4)
+    const xs = Object.values(doc.nodes)
+      .map((n) => n.pos.x)
+      .sort((a, b) => a - b)
+    const ys = Object.values(doc.nodes)
+      .map((n) => n.pos.y)
+      .sort((a, b) => a - b)
+    expect(xs).toEqual([-100, -100, 0, 0])
+    expect(ys).toEqual([-100, -100, 0, 0])
+  })
+
+  it('frees the rectangle again when shift is released mid-drag', () => {
+    const tool = createRoomTool()
+    const { ctx } = setup()
+
+    tool.onPointerDown!(at(0, 0), ctx)
+    tool.onPointerMove!(at(200, 50, true), ctx) // squared
+    tool.onPointerMove!(at(200, 50, false), ctx) // shift released → free rectangle
+
+    const overlay = tool.preview!
+    expect(overlay.ghostRoom).toEqual([
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+      { x: 200, y: 50 },
+      { x: 0, y: 50 },
+    ])
   })
 
   it('clears the in-progress room on cancel', () => {
