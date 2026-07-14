@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { useEditorStore } from '../store/editorStore'
 import { computeWallGeometry } from '../render2d/wallJoints'
+import { recallCamera, rememberCamera } from './cameraMemory'
 import { docBounds } from '../domain/operations'
 import { detectRooms } from '../domain/rooms'
 import type { SceneDocument, Vec2 } from '../domain/types'
@@ -144,6 +145,27 @@ function frameCamera() {
   controls.update()
 }
 
+/** Puts the camera back where the user left it, or frames the plan on a first visit. */
+function restoreOrFrameCamera() {
+  const pose = editor.projectId ? recallCamera(editor.projectId) : null
+  if (!pose || !camera || !controls) {
+    frameCamera()
+    return
+  }
+  camera.position.set(...pose.position)
+  controls.target.set(...pose.target)
+  camera.updateProjectionMatrix()
+  controls.update()
+}
+
+function saveCamera() {
+  if (!camera || !controls || !editor.projectId) return
+  rememberCamera(editor.projectId, {
+    position: [camera.position.x, camera.position.y, camera.position.z],
+    target: [controls.target.x, controls.target.y, controls.target.z],
+  })
+}
+
 function resize() {
   if (!container.value || !renderer || !camera) return
   const { width, height } = container.value.getBoundingClientRect()
@@ -184,7 +206,7 @@ onMounted(() => {
   controls.addEventListener('change', requestRender)
 
   rebuild()
-  frameCamera()
+  restoreOrFrameCamera()
   resize()
 
   resizeObserver = new ResizeObserver(resize)
@@ -194,7 +216,18 @@ onMounted(() => {
 // the document is non-reactive; the store bumps `revision` on every change
 watch(() => editor.revision, rebuild)
 
+// a different plan is its own scene: frame it rather than keeping a pose that
+// was aimed at the previous project's content
+watch(
+  () => editor.projectId,
+  () => {
+    frameCamera()
+    requestRender()
+  },
+)
+
 onBeforeUnmount(() => {
+  saveCamera()
   if (frameId !== undefined) cancelAnimationFrame(frameId)
   resizeObserver?.disconnect()
   disposeContent()
