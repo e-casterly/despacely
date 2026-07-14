@@ -9,8 +9,8 @@ describe('parseDocument', () => {
   })
 
   it('rejects non-objects', () => {
-    expect(() => parseDocument(null)).toThrow()
-    expect(() => parseDocument('walls')).toThrow()
+    expect(() => parseDocument(null)).toThrow(/not an object/)
+    expect(() => parseDocument('walls')).toThrow(/not an object/)
   })
 
   it('rejects a missing or malformed nodes map', () => {

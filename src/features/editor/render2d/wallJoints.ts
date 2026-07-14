@@ -82,8 +82,10 @@ export function computeWallGeometry(doc: SceneDocument): WallGeometry {
     // behind the node is kept only while it hugs the node (an ordinary outer
     // corner); otherwise the pair falls back to square butts and simply
     // overlaps — no spike out the back of the node.
-    const leftCorners: Vec2[] = new Array(armCount)
-    const rightCorners: Vec2[] = new Array(armCount)
+    // the loop below writes every slot of both (each arm gets a left corner, and
+    // each arm's right corner comes from its neighbour) before either is read
+    const leftCorners: Vec2[] = []
+    const rightCorners: Vec2[] = []
     for (let k = 0; k < armCount; k++) {
       const arm = ring[k]!
       const next = ring[(k + 1) % armCount]! // next neighbour going around the node

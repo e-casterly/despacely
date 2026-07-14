@@ -7,11 +7,11 @@ import type { Project } from '../types'
 
 vi.mock('../projectDb', () => ({
   projectDb: {
-    getAll: vi.fn(),
-    get: vi.fn(),
-    save: vi.fn(),
-    remove: vi.fn(),
-    duplicate: vi.fn(),
+    getAll: vi.fn<typeof projectDb.getAll>(),
+    get: vi.fn<typeof projectDb.get>(),
+    save: vi.fn<typeof projectDb.save>(),
+    remove: vi.fn<typeof projectDb.remove>(),
+    duplicate: vi.fn<typeof projectDb.duplicate>(),
   },
 }))
 

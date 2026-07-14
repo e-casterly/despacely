@@ -6,8 +6,8 @@ import { createRoomTool } from '../roomTool'
 
 function setup() {
   const doc = createEmptyDocument()
-  const apply = vi.fn((command) => command.do(doc))
-  const ctx: ToolContext = { doc, apply, select: vi.fn(), snapDist: 5 }
+  const apply = vi.fn<ToolContext['apply']>((command) => command.do(doc))
+  const ctx: ToolContext = { doc, apply, select: vi.fn<ToolContext['select']>(), snapDist: 5 }
   return { doc, ctx, apply }
 }
 

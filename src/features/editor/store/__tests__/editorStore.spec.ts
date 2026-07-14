@@ -22,9 +22,9 @@ function makeItem(id = 'i1'): Item {
 
 vi.mock('../../persistence/documentDb', () => ({
   documentDb: {
-    get: vi.fn(),
-    save: vi.fn(),
-    remove: vi.fn(),
+    get: vi.fn<typeof documentDb.get>(),
+    save: vi.fn<typeof documentDb.save>(),
+    remove: vi.fn<typeof documentDb.remove>(),
   },
 }))
 
