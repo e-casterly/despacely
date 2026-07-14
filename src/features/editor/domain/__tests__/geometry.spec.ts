@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { distToSegment, pointInPolygon, pointInRotatedRect, polygonCentroid } from '../geometry'
+import {
+  clipPolygon,
+  distToSegment,
+  pointInPolygon,
+  pointInRotatedRect,
+  polygonCentroid,
+  projectOnSegment,
+} from '../geometry'
 
 describe('distToSegment', () => {
   const a = { x: 0, y: 0 }
@@ -112,5 +119,64 @@ describe('pointInRotatedRect', () => {
     const rot = Math.PI / 4
     expect(pointInRotatedRect({ x: 118, y: 118 }, center, size, rot)).toBe(true)
     expect(pointInRotatedRect({ x: 125, y: 100 }, center, size, rot)).toBe(false)
+  })
+})
+
+describe('projectOnSegment', () => {
+  const a = { x: 0, y: 0 }
+  const b = { x: 100, y: 0 }
+
+  it('reports where along the segment the foot of the perpendicular lands', () => {
+    const { point, t, distance } = projectOnSegment({ x: 30, y: 12 }, a, b)
+
+    expect(point).toEqual({ x: 30, y: 0 })
+    expect(t).toBe(0.3)
+    expect(distance).toBe(12)
+  })
+
+  it('clamps past either end, so t never leaves [0, 1]', () => {
+    expect(projectOnSegment({ x: -50, y: 0 }, a, b).t).toBe(0)
+    expect(projectOnSegment({ x: 500, y: 0 }, a, b).t).toBe(1)
+  })
+
+  it('collapses to the shared endpoint for a zero-length segment', () => {
+    const { point, t, distance } = projectOnSegment({ x: 3, y: 4 }, a, a)
+
+    expect(point).toEqual(a)
+    expect(t).toBe(0)
+    expect(distance).toBe(5)
+  })
+})
+
+describe('clipPolygon', () => {
+  /** A 100x100 square with its corner at the origin. */
+  const square = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 0, y: 100 },
+  ]
+  const right = { x: 1, y: 0 } // normal pointing along +x: keeps everything left of the line
+
+  it('keeps a polygon that lies wholly on the near side', () => {
+    expect(clipPolygon(square, { x: 500, y: 0 }, right)).toEqual(square)
+  })
+
+  it('drops a polygon that lies wholly on the far side', () => {
+    expect(clipPolygon(square, { x: -50, y: 0 }, right)).toEqual([])
+  })
+
+  it('cuts a polygon the line crosses, closing it off along the cut', () => {
+    const clipped = clipPolygon(square, { x: 40, y: 0 }, right)
+
+    const xs = clipped.map((p) => p.x)
+    expect(Math.min(...xs)).toBe(0)
+    expect(Math.max(...xs)).toBe(40) // nothing past the cut survives
+    expect(clipped).toHaveLength(4) // still a closed quad
+  })
+
+  it('keeps points lying exactly on the line', () => {
+    // the cut runs along the square's own right edge: the whole square stays
+    expect(clipPolygon(square, { x: 100, y: 0 }, right)).toEqual(square)
   })
 })

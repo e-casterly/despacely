@@ -30,6 +30,40 @@ export function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
   return projectOnSegment(p, a, b).distance
 }
 
+/**
+ * The part of a polygon lying on the near side of a line: every point p with
+ * dot(p - point, normal) <= 0, with the cut edge closed off. Empty when nothing
+ * survives the cut.
+ *
+ * One clip edge of Sutherland–Hodgman. That algorithm assumes a convex subject —
+ * a concave one whose cut would fall into two separate pieces comes back as a
+ * single ring joined by a degenerate edge along the cut. Wall footprints are
+ * thickened line segments, so a cut across one always leaves a single piece.
+ */
+export function clipPolygon(polygon: Vec2[], point: Vec2, normal: Vec2): Vec2[] {
+  if (polygon.length < 3) return []
+  const side = (p: Vec2): number => (p.x - point.x) * normal.x + (p.y - point.y) * normal.y
+
+  const clipped: Vec2[] = []
+  for (let i = 0; i < polygon.length; i++) {
+    const current = polygon[i]!
+    const next = polygon[(i + 1) % polygon.length]!
+    const here = side(current)
+    const there = side(next)
+
+    if (here <= 0) clipped.push(current)
+    // the edge straddles the line: keep where it crosses
+    if ((here < 0 && there > 0) || (here > 0 && there < 0)) {
+      const t = here / (here - there)
+      clipped.push({
+        x: current.x + (next.x - current.x) * t,
+        y: current.y + (next.y - current.y) * t,
+      })
+    }
+  }
+  return clipped.length >= 3 ? clipped : []
+}
+
 /** Area-weighted centroid of a simple polygon; vertex mean when the area is zero. */
 export function polygonCentroid(polygon: Vec2[]): Vec2 {
   let area2 = 0 // twice the signed area

@@ -1,4 +1,4 @@
-import { pointInPolygon } from './geometry'
+import { clipPolygon, pointInPolygon } from './geometry'
 import { wallSegment } from './operations'
 import type { Opening, SceneDocument, Vec2, Wall } from './types'
 import { computeWallGeometry, type WallFaces, type WallGeometry } from './wallJoints'
@@ -190,6 +190,103 @@ export function overlapsAnotherOpening(wall: Wall, candidate: Opening): boolean 
     const otherEnd = other.offset + other.width / 2
     return start < otherEnd && otherStart < end
   })
+}
+
+/** A wall footprint cut up by its openings, along the wall's axis. */
+export interface WallSlices {
+  /** the solid stretches between (and beyond) the openings */
+  piers: Vec2[][]
+  /** the band each opening cuts, paired with the opening that cut it */
+  openings: { opening: Opening; ring: Vec2[] }[]
+}
+
+/**
+ * Cuts a wall's footprint across its axis at every jamb, giving the solid piers
+ * and the band under each opening: `pier | opening | pier | opening | …`.
+ *
+ * This exists because 3D cannot carve an opening the way 2D does. A wall is
+ * extruded from its *footprint*, so a hole punched in that footprint would be
+ * swept upwards with it — a shaft from floor to ceiling, not a door. (And an
+ * opening spans the wall's full thickness anyway, so its edges lie on the
+ * footprint's own faces: it is not an interior hole at all.) But that is exactly
+ * what makes this work — a full-thickness cut doesn't pierce the footprint, it
+ * *slices* it. The caller then extrudes the piers full height and puts only a
+ * sill and a lintel in each opening band, leaving the doorway itself empty.
+ *
+ * A wall with no openings comes back as a single pier — the polygon it was given,
+ * untouched — so there is one code path and no special case.
+ */
+export function sliceWallFootprint(
+  polygon: Vec2[],
+  origin: Vec2,
+  axis: Vec2,
+  fitted: FittedOpening[],
+): WallSlices {
+  if (fitted.length === 0) return { piers: [polygon], openings: [] }
+
+  // A cut at offset `s` keeps whichever side the normal points away from, so
+  // `axis` trims everything past s, and the reversed axis trims everything before
+  // it. `null` means "no cut on this side" — the wall's own end already bounds it.
+  const back = { x: -axis.x, y: -axis.y }
+  const band = (from: number | null, to: number | null): Vec2[] => {
+    let piece = polygon
+    if (to !== null) piece = clipPolygon(piece, alongAxis(origin, axis, to), axis)
+    if (from !== null) piece = clipPolygon(piece, alongAxis(origin, axis, from), back)
+    return piece
+  }
+
+  const inOrder = [...fitted].sort((p, q) => p.span.start - q.span.start)
+  const piers: Vec2[][] = []
+  const openings: WallSlices['openings'] = []
+  let cursor: number | null = null // the end of the last opening; null before the first
+
+  for (const { opening, span } of inOrder) {
+    const pier = band(cursor, span.start)
+    if (pier.length >= 3) piers.push(pier) // empty when an opening starts flush with the last
+    const ring = band(span.start, span.end)
+    if (ring.length >= 3) openings.push({ opening, ring })
+    cursor = span.end
+  }
+  const tail = band(cursor, null)
+  if (tail.length >= 3) piers.push(tail)
+
+  return { piers, openings }
+}
+
+/** One extruded block of a wall: a footprint ring standing from `baseY` to `baseY + height`. */
+export interface WallBlock {
+  ring: Vec2[]
+  baseY: number
+  height: number
+}
+
+/**
+ * The solid blocks a wall is built from once its openings are cut out: the piers
+ * at full height, plus a sill under each opening and a lintel over it. What is
+ * left between the sill and the lintel is the opening itself.
+ *
+ * A door has `sill: 0` and so gets no sill block. Heights are clamped to the
+ * wall: `wall.height` is edited independently of the opening, so a door taller
+ * than its wall must simply lose its lintel rather than extrude one to a negative
+ * depth (which would turn the block inside out).
+ */
+export function wallBlocks(wall: Wall, slices: WallSlices): WallBlock[] {
+  const blocks: WallBlock[] = slices.piers.map((ring) => ({
+    ring,
+    baseY: 0,
+    height: wall.height,
+  }))
+
+  for (const { opening, ring } of slices.openings) {
+    const sill = Math.min(opening.sill, wall.height)
+    if (sill > 0) blocks.push({ ring, baseY: 0, height: sill })
+
+    const head = Math.min(opening.sill + opening.height, wall.height)
+    if (wall.height - head > 0) {
+      blocks.push({ ring, baseY: head, height: wall.height - head })
+    }
+  }
+  return blocks
 }
 
 // --- vector helpers ---

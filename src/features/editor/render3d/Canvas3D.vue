@@ -5,7 +5,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { useEditorStore } from '../store/editorStore'
 import { computeWallGeometry } from '../domain/wallJoints'
 import { recallCamera, rememberCamera } from './cameraMemory'
-import { docBounds } from '../domain/operations'
+import { fittingOpenings, sliceWallFootprint, wallBlocks } from '../domain/openings'
+import { docBounds, wallSegment } from '../domain/operations'
 import { detectRooms } from '../domain/rooms'
 import type { SceneDocument, Vec2 } from '../domain/types'
 
@@ -64,14 +65,37 @@ function buildContent(doc: SceneDocument): THREE.Group {
     color: WALL_COLOR,
     side: THREE.DoubleSide,
   })
-  const { polygons } = computeWallGeometry(doc)
-  for (const wall of doc.walls) {
-    const polygon = polygons.get(wall.id)
-    if (!polygon || polygon.length < 3) continue
-    const shape = new THREE.Shape(polygon.map(planToShape))
-    const geometry = new THREE.ExtrudeGeometry(shape, { depth: wall.height, bevelEnabled: false })
+  /** One extruded block of wall: a footprint ring, rising `height` from `baseY`. */
+  const addBlock = (ring: Vec2[], baseY: number, height: number): void => {
+    if (ring.length < 3 || height <= 0) return
+    const geometry = new THREE.ExtrudeGeometry(new THREE.Shape(ring.map(planToShape)), {
+      depth: height,
+      bevelEnabled: false,
+    })
+    // the rotate turns the extrusion into the Y axis, so the lift is a plain translate
     geometry.rotateX(-Math.PI / 2)
+    geometry.translate(0, baseY, 0)
     group.add(new THREE.Mesh(geometry, wallMaterial))
+  }
+
+  const geometry = computeWallGeometry(doc)
+  const openings = fittingOpenings(doc, geometry)
+  for (const wall of doc.walls) {
+    const polygon = geometry.polygons.get(wall.id)
+    if (!polygon || polygon.length < 3) continue
+    const { a, b } = wallSegment(doc, wall)
+    const length = Math.hypot(b.x - a.x, b.y - a.y)
+    if (length === 0) continue
+    const axis = { x: (b.x - a.x) / length, y: (b.y - a.y) / length }
+
+    // An opening cannot be a hole in the extruded profile — that would sweep it
+    // upward into a floor-to-ceiling shaft. It is a cut *across* the footprint
+    // instead: solid piers either side, and a sill and lintel around the gap.
+    // A wall with no openings yields one full-height pier: the same polygon.
+    const slices = sliceWallFootprint(polygon, a, axis, openings.get(wall.id) ?? [])
+    for (const block of wallBlocks(wall, slices)) {
+      addBlock(block.ring, block.baseY, block.height)
+    }
   }
 
   // Floors: rooms are derived from the wall graph, never stored. A nested

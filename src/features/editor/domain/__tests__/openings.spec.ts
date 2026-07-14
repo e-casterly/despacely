@@ -6,10 +6,13 @@ import {
   openingRect,
   openingSpan,
   overlapsAnotherOpening,
+  sliceWallFootprint,
+  wallBlocks,
   wallClearRange,
+  type FittedOpening,
 } from '../openings'
 import { addNode, addWall, createEmptyDocument, wallSegment } from '../operations'
-import type { Opening, SceneDocument, Wall } from '../types'
+import type { Opening, SceneDocument, Vec2, Wall } from '../types'
 import { computeWallGeometry } from '../wallJoints'
 
 function makeOpening(id: string, overrides: Partial<Opening> = {}): Opening {
@@ -235,6 +238,188 @@ describe('openingAtPoint', () => {
     wall.openings = [makeOpening('o1', { offset: 100, width: 400 })]
 
     expect(openingAtPoint(doc, { x: 100, y: 0 })).toBeUndefined()
+  })
+})
+
+describe('sliceWallFootprint', () => {
+  /** Area of a ring (unsigned) — enough to identify a rectangle's size. */
+  function area(ring: Vec2[]): number {
+    let twice = 0
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i]!
+      const q = ring[(i + 1) % ring.length]!
+      twice += p.x * q.y - q.x * p.y
+    }
+    return Math.abs(twice) / 2
+  }
+
+  /** Extent of a ring along the wall's x axis. */
+  function xRange(ring: Vec2[]): [number, number] {
+    const xs = ring.map((p) => p.x)
+    return [Math.min(...xs), Math.max(...xs)]
+  }
+
+  /** A 200x10 wall footprint along the x axis, centred on y=0. */
+  const footprint: Vec2[] = [
+    { x: 0, y: -5 },
+    { x: 200, y: -5 },
+    { x: 200, y: 5 },
+    { x: 0, y: 5 },
+  ]
+  const origin: Vec2 = { x: 0, y: 0 }
+  const axis: Vec2 = { x: 1, y: 0 }
+
+  function fittedAt(id: string, offset: number, width: number): FittedOpening {
+    const start = offset - width / 2
+    const end = offset + width / 2
+    return {
+      opening: makeOpening(id, { offset, width }),
+      span: {
+        start,
+        end,
+        jambA: { x: start, y: 0 },
+        jambB: { x: end, y: 0 },
+        axis,
+      },
+    }
+  }
+
+  it('gives back the untouched polygon when the wall has no openings', () => {
+    const { piers, openings } = sliceWallFootprint(footprint, origin, axis, [])
+
+    expect(piers).toEqual([footprint])
+    expect(openings).toEqual([])
+  })
+
+  it('cuts one opening into two piers and a band', () => {
+    const fitted = [fittedAt('o1', 100, 80)] // spans [60, 140]
+
+    const { piers, openings } = sliceWallFootprint(footprint, origin, axis, fitted)
+
+    expect(piers).toHaveLength(2)
+    expect(xRange(piers[0]!)).toEqual([0, 60])
+    expect(xRange(piers[1]!)).toEqual([140, 200])
+    expect(piers.map(area)).toEqual([600, 600]) // 60 x 10 each
+
+    expect(openings).toHaveLength(1)
+    expect(openings[0]!.opening.id).toBe('o1')
+    expect(xRange(openings[0]!.ring)).toEqual([60, 140])
+    expect(area(openings[0]!.ring)).toBe(800) // 80 x 10
+  })
+
+  it('keeps the full thickness of the wall in every slice', () => {
+    const { piers, openings } = sliceWallFootprint(footprint, origin, axis, [
+      fittedAt('o1', 100, 80),
+    ])
+
+    for (const ring of [...piers, openings[0]!.ring]) {
+      const ys = ring.map((p) => p.y)
+      expect([Math.min(...ys), Math.max(...ys)]).toEqual([-5, 5])
+    }
+  })
+
+  it('handles several openings, in wall order however they were listed', () => {
+    // handed over back to front, to prove the slicing sorts them itself
+    const fitted = [fittedAt('right', 160, 40), fittedAt('left', 50, 40)]
+
+    const { piers, openings } = sliceWallFootprint(footprint, origin, axis, fitted)
+
+    expect(openings.map((o) => o.opening.id)).toEqual(['left', 'right'])
+    // pier | left [30,70] | pier | right [140,180] | pier
+    expect(piers.map(xRange)).toEqual([
+      [0, 30],
+      [70, 140],
+      [180, 200],
+    ])
+  })
+
+  it('drops the pier when an opening runs right up to the wall end', () => {
+    const fitted = [fittedAt('o1', 180, 40)] // spans [160, 200] — flush with the end
+
+    const { piers } = sliceWallFootprint(footprint, origin, axis, fitted)
+
+    expect(piers.map(xRange)).toEqual([[0, 160]]) // no zero-width pier past it
+  })
+
+  it('slices a mitred footprint from a real T-junction without losing it', () => {
+    // the concave case the convexity caveat warns about: a wall in a T
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const stem = addNode(doc, { x: 100, y: 100 })
+    const wall = addWall(doc, a, b, { thickness: 20 })
+    addWall(doc, addNode(doc, { x: 100, y: 0 }), stem, { thickness: 20 })
+    const ring = computeWallGeometry(doc).polygons.get(wall.id)!
+
+    const { piers, openings } = sliceWallFootprint(ring, { x: 0, y: 0 }, axis, [
+      fittedAt('o1', 50, 40),
+    ])
+
+    expect(openings).toHaveLength(1)
+    expect(area(openings[0]!.ring)).toBeCloseTo(800, 6) // 40 x 20, no sliver
+    // the whole footprint is accounted for: nothing was dropped by the cut
+    const total = piers.reduce((sum, p) => sum + area(p), 0) + area(openings[0]!.ring)
+    expect(total).toBeCloseTo(area(ring), 6)
+  })
+})
+
+describe('wallBlocks', () => {
+  const ring: Vec2[] = [
+    { x: 0, y: -5 },
+    { x: 10, y: -5 },
+    { x: 10, y: 5 },
+    { x: 0, y: 5 },
+  ]
+  const wallOf = (height: number) => ({ height }) as Wall
+  /** Just the vertical extents, which is all this function decides. */
+  const spans = (blocks: { baseY: number; height: number }[]) =>
+    blocks.map((b) => [b.baseY, b.baseY + b.height])
+
+  it('stands every pier at full height', () => {
+    const blocks = wallBlocks(wallOf(270), { piers: [ring, ring], openings: [] })
+
+    expect(spans(blocks)).toEqual([
+      [0, 270],
+      [0, 270],
+    ])
+  })
+
+  it('gives a door a lintel and no sill', () => {
+    const door = makeOpening('d', { kind: 'door', height: 210, sill: 0 })
+
+    const blocks = wallBlocks(wallOf(270), { piers: [], openings: [{ opening: door, ring }] })
+
+    // nothing under the door; wall resumes above it, 210 up to 270
+    expect(spans(blocks)).toEqual([[210, 270]])
+  })
+
+  it('gives a window both a sill and a lintel', () => {
+    const window = makeOpening('w', { kind: 'window', height: 120, sill: 90 })
+
+    const blocks = wallBlocks(wallOf(270), { piers: [], openings: [{ opening: window, ring }] })
+
+    // sill 0–90, glass 90–210, lintel 210–270
+    expect(spans(blocks)).toEqual([
+      [0, 90],
+      [210, 270],
+    ])
+  })
+
+  it('drops the lintel rather than extruding it backwards when the opening is too tall', () => {
+    // the wall was shortened below the door's head; a naive lintel would be -30 tall
+    const door = makeOpening('d', { kind: 'door', height: 210, sill: 0 })
+
+    const blocks = wallBlocks(wallOf(180), { piers: [], openings: [{ opening: door, ring }] })
+
+    expect(blocks).toEqual([])
+  })
+
+  it('clamps a sill that stands taller than its wall', () => {
+    const window = makeOpening('w', { kind: 'window', height: 120, sill: 300 })
+
+    const blocks = wallBlocks(wallOf(270), { piers: [], openings: [{ opening: window, ring }] })
+
+    expect(spans(blocks)).toEqual([[0, 270]]) // solid: the wall never reaches the sill
   })
 })
 
