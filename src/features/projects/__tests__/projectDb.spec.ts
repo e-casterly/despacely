@@ -20,7 +20,7 @@ describe('projectDb.duplicate', () => {
     const doc = createEmptyDocument()
     doc.nodes.n1 = { id: 'n1', pos: { x: 0, y: 0 } }
     doc.nodes.n2 = { id: 'n2', pos: { x: 100, y: 0 } }
-    doc.walls.push({ id: 'w1', a: 'n1', b: 'n2', thickness: 10, height: 270 })
+    doc.walls.push({ id: 'w1', a: 'n1', b: 'n2', thickness: 10, height: 270, openings: [] })
     await db.documents.put({ projectId: 'p1', doc, updatedAt: 1000 })
 
     const copy = await projectDb.duplicate('p1', 'My flat (copy)')

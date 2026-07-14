@@ -18,6 +18,31 @@ export interface Node {
   pos: Vec2
 }
 
+export type OpeningKind = 'door' | 'window'
+
+/**
+ * A door or window cut into a wall. The two kinds differ only by `sill` (a door
+ * sits on the floor) and by the symbol the plan draws for them.
+ *
+ * Positioned in absolute cm from the wall's node A, not as a fraction of its
+ * length: stretching a wall must not stretch or slide its door. The cost is that
+ * a wall can end up too short to hold an opening — that is never repaired by
+ * mutating the data. Fitness is derived (see `openingSpan`), so a shrunken wall
+ * simply stops drawing the opening and lengthening it brings the opening back.
+ */
+export interface Opening {
+  id: string
+  kind: OpeningKind
+  /** cm from node A along the centerline to the opening's midpoint */
+  offset: number
+  /** clear width along the centerline */
+  width: number
+  /** clear height */
+  height: number
+  /** height of the bottom edge above the floor; 0 for a door */
+  sill: number
+}
+
 export interface Wall {
   id: string
   /** centerline endpoints, referenced by node id so corners stay connected */
@@ -25,6 +50,8 @@ export interface Wall {
   b: NodeId
   thickness: number
   height: number
+  /** doors and windows cut into this wall, positioned from node A */
+  openings: Opening[]
 }
 
 export interface Item {

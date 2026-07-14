@@ -1,4 +1,4 @@
-import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
+import type { NodeId, SceneDocument, Vec2, Wall } from './types'
 
 /**
  * Wall junction geometry as a radial seam partition. Each wall becomes a single

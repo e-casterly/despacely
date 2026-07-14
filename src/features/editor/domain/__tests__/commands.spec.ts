@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   AddItemCommand,
+  AddOpeningCommand,
   AddRoomCommand,
   AddWallCommand,
   MergeNodesCommand,
@@ -9,13 +10,26 @@ import {
   MoveNodesCommand,
   RemoveItemCommand,
   RemoveNodeCommand,
+  RemoveOpeningCommand,
   RemoveRoomCommand,
   RemoveWallCommand,
+  SetOpeningPropsCommand,
   SetWallPropsCommand,
 } from '../commands'
-import { addNode, addWall, createEmptyDocument, findWall, wallsAtNode } from '../operations'
+import {
+  addNode,
+  addWall,
+  createEmptyDocument,
+  findOpening,
+  findWall,
+  wallsAtNode,
+} from '../operations'
 import { detectRooms, roomAt, roomKey } from '../rooms'
-import type { Item, SceneDocument } from '../types'
+import type { Item, Opening, SceneDocument } from '../types'
+
+function makeOpening(id: string, overrides: Partial<Opening> = {}): Opening {
+  return { id, kind: 'door', offset: 50, width: 20, height: 210, sill: 0, ...overrides }
+}
 
 function makeItem(id = 'i1'): Item {
   return {
@@ -463,5 +477,234 @@ describe('item commands', () => {
     expect(doc.items[0]!.pos).toEqual({ x: 200, y: 100 })
     cmd.undo(doc)
     expect(doc.items[0]!.pos).toEqual({ x: 0, y: 0 })
+  })
+})
+
+/** A single 200cm wall, ready to take openings. */
+function docWithWall() {
+  const doc = createEmptyDocument()
+  const a = addNode(doc, { x: 0, y: 0 })
+  const b = addNode(doc, { x: 200, y: 0 })
+  return { doc, wall: addWall(doc, a, b), a, b }
+}
+
+describe('AddOpeningCommand', () => {
+  it('adds the opening to its wall', () => {
+    const { doc, wall } = docWithWall()
+    const opening = makeOpening('o1')
+
+    new AddOpeningCommand(wall.id, opening).do(doc)
+
+    expect(findWall(doc, wall.id)!.openings).toEqual([opening])
+  })
+
+  it('undo takes it back off', () => {
+    const { doc, wall } = docWithWall()
+    const cmd = new AddOpeningCommand(wall.id, makeOpening('o1'))
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(findWall(doc, wall.id)!.openings).toEqual([])
+  })
+
+  it('redo re-adds the same opening, id and all', () => {
+    const { doc, wall } = docWithWall()
+    const cmd = new AddOpeningCommand(wall.id, makeOpening('o1', { offset: 70 }))
+
+    cmd.do(doc)
+    cmd.undo(doc)
+    cmd.do(doc)
+
+    expect(findWall(doc, wall.id)!.openings).toEqual([makeOpening('o1', { offset: 70 })])
+  })
+})
+
+describe('RemoveOpeningCommand', () => {
+  it('removes the opening', () => {
+    const { doc, wall } = docWithWall()
+    wall.openings = [makeOpening('o1'), makeOpening('o2', { offset: 150 })]
+
+    new RemoveOpeningCommand('o1').do(doc)
+
+    expect(wall.openings.map((o) => o.id)).toEqual(['o2'])
+  })
+
+  it('undo puts it back at its old index, not on the end', () => {
+    const { doc, wall } = docWithWall()
+    const first = makeOpening('o1')
+    const second = makeOpening('o2', { offset: 150 })
+    wall.openings = [first, second]
+    const cmd = new RemoveOpeningCommand('o1')
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(wall.openings).toEqual([first, second])
+  })
+
+  it('does nothing for an opening that is already gone', () => {
+    const { doc, wall } = docWithWall()
+    const cmd = new RemoveOpeningCommand('ghost')
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(wall.openings).toEqual([])
+  })
+})
+
+describe('SetOpeningPropsCommand', () => {
+  it('applies a partial patch, leaving the other props alone', () => {
+    const { doc, wall } = docWithWall()
+    wall.openings = [makeOpening('o1', { offset: 50, width: 20 })]
+
+    new SetOpeningPropsCommand('o1', { width: 90 }).do(doc)
+
+    expect(findOpening(doc, 'o1')!.opening).toEqual(makeOpening('o1', { offset: 50, width: 90 }))
+  })
+
+  it('undo restores every prop it touched', () => {
+    const { doc, wall } = docWithWall()
+    const before = makeOpening('o1', { offset: 50, width: 20, height: 210, sill: 0 })
+    wall.openings = [{ ...before }]
+    const cmd = new SetOpeningPropsCommand('o1', { offset: 120, width: 90, sill: 40 })
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(findOpening(doc, 'o1')!.opening).toEqual(before)
+  })
+
+  it('redo re-applies the patch after an undo', () => {
+    const { doc, wall } = docWithWall()
+    wall.openings = [makeOpening('o1', { offset: 50 })]
+    const cmd = new SetOpeningPropsCommand('o1', { offset: 120 })
+
+    cmd.do(doc)
+    cmd.undo(doc)
+    cmd.do(doc)
+
+    expect(findOpening(doc, 'o1')!.opening.offset).toBe(120)
+  })
+})
+
+/**
+ * The payoff of storing openings on the wall: every command that destroys a wall
+ * already stashes and restores the whole Wall object, so undo brings its openings
+ * back with it — and not one of these commands mentions openings anywhere.
+ */
+describe('openings ride along with the walls that carry them', () => {
+  it('RemoveWallCommand undo restores the wall with its openings', () => {
+    const { doc, wall } = docWithWall()
+    wall.openings = [makeOpening('o1')]
+    const cmd = new RemoveWallCommand(wall.id)
+
+    cmd.do(doc)
+    expect(findOpening(doc, 'o1')).toBeUndefined()
+    cmd.undo(doc)
+
+    expect(findOpening(doc, 'o1')!.opening).toEqual(makeOpening('o1'))
+  })
+
+  it('RemoveNodeCommand undo restores the cascaded walls with their openings', () => {
+    const doc = createEmptyDocument()
+    const corner = addNode(doc, { x: 0, y: 0 })
+    const east = addNode(doc, { x: 200, y: 0 })
+    const south = addNode(doc, { x: 0, y: 200 })
+    addWall(doc, corner, east).openings = [makeOpening('o1')]
+    addWall(doc, corner, south).openings = [makeOpening('o2')]
+    const cmd = new RemoveNodeCommand(corner)
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(findOpening(doc, 'o1')!.opening).toEqual(makeOpening('o1'))
+    expect(findOpening(doc, 'o2')!.opening).toEqual(makeOpening('o2'))
+  })
+
+  it('RemoveRoomCommand undo restores the room walls with their openings', () => {
+    const doc = createEmptyDocument()
+    const key = docWithTwoRooms(doc)
+    doc.walls[0]!.openings = [makeOpening('o1')]
+    const cmd = new RemoveRoomCommand(key)
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(findOpening(doc, 'o1')!.opening).toEqual(makeOpening('o1'))
+  })
+
+  it('MergeNodesCommand undo restores a dropped duplicate wall with its openings', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const stray = addNode(doc, { x: 205, y: 0 })
+    addWall(doc, a, b)
+    // welding `stray` onto `b` makes this wall a duplicate of the one above, so
+    // the merge drops it — taking its opening with it
+    addWall(doc, a, stray).openings = [makeOpening('o1')]
+    const cmd = new MergeNodesCommand(stray, b)
+
+    cmd.do(doc)
+    expect(findOpening(doc, 'o1')).toBeUndefined()
+    cmd.undo(doc)
+
+    expect(findOpening(doc, 'o1')!.opening).toEqual(makeOpening('o1'))
+  })
+})
+
+describe('AddWallCommand through a wall carrying openings', () => {
+  /** Draws a wall down from the middle of a 200cm wall, splitting it in two. */
+  function splitWithNewWall(doc: SceneDocument) {
+    const cmd = new AddWallCommand({ x: 100, y: 0 }, { x: 100, y: 100 })
+    cmd.do(doc)
+    return cmd
+  }
+
+  function openingsByWall(doc: SceneDocument) {
+    return doc.walls.map((w) => w.openings.map((o) => `${o.id}@${o.offset}`)).flat().sort()
+  }
+
+  it('splits the openings between the halves and drops the one it cuts through', () => {
+    const { doc, wall } = docWithWall()
+    wall.openings = [
+      makeOpening('left', { offset: 40, width: 20 }),
+      makeOpening('right', { offset: 160, width: 20 }),
+      makeOpening('across', { offset: 100, width: 40 }),
+    ]
+
+    splitWithNewWall(doc)
+
+    expect(openingsByWall(doc)).toEqual(['left@40', 'right@60'])
+  })
+
+  it('undo restores the original wall with all three openings, the cut one included', () => {
+    const { doc, wall } = docWithWall()
+    wall.openings = [
+      makeOpening('left', { offset: 40, width: 20 }),
+      makeOpening('right', { offset: 160, width: 20 }),
+      makeOpening('across', { offset: 100, width: 40 }),
+    ]
+    const cmd = splitWithNewWall(doc)
+
+    cmd.undo(doc)
+
+    expect(openingsByWall(doc)).toEqual(['across@100', 'left@40', 'right@160'])
+  })
+
+  it('redo replays the split and lands on the same opening ids and offsets', () => {
+    const { doc, wall } = docWithWall()
+    wall.openings = [
+      makeOpening('left', { offset: 40, width: 20 }),
+      makeOpening('right', { offset: 160, width: 20 }),
+      makeOpening('across', { offset: 100, width: 40 }),
+    ]
+    const cmd = splitWithNewWall(doc)
+
+    cmd.undo(doc)
+    cmd.do(doc)
+
+    expect(openingsByWall(doc)).toEqual(['left@40', 'right@60'])
   })
 })

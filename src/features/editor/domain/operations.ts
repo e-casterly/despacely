@@ -1,5 +1,5 @@
-import { distToSegment } from './geometry'
-import type { Item, Node, NodeId, SceneDocument, Vec2, Wall } from './types'
+import { distToSegment, projectOnSegment } from './geometry'
+import type { Item, Node, NodeId, Opening, SceneDocument, Vec2, Wall } from './types'
 import { WALL_HEIGHT, WALL_THICKNESS } from './units'
 
 export interface WallOptions {
@@ -65,6 +65,7 @@ export function addWall(doc: SceneDocument, a: NodeId, b: NodeId, opts: WallOpti
     b,
     thickness: opts.thickness ?? WALL_THICKNESS,
     height: opts.height ?? WALL_HEIGHT,
+    openings: [],
   }
   doc.walls.push(wall)
   return wall
@@ -96,9 +97,33 @@ export function findWall(doc: SceneDocument, id: string): Wall | undefined {
 export const ON_WALL_TOL = 0.001
 
 /**
+ * The wall the point sits deepest inside, within a pick tolerance (cm).
+ *
+ * This is the "what did the user click on" question: it ranks by depth into the
+ * wall's *body*, so next to a seam a thick wall beats a thin neighbour whose
+ * centerline happens to be closer. Contrast `wallAtPoint`, which measures to the
+ * centerline and deliberately refuses hits near the ends — that one answers
+ * "where would a new wall split this one", which is a different question.
+ */
+export function wallUnderPoint(doc: SceneDocument, point: Vec2, slop: number): Wall | undefined {
+  let best: Wall | undefined
+  let bestDepth = Infinity
+  for (const wall of doc.walls) {
+    const { a, b } = wallSegment(doc, wall)
+    const depth = distToSegment(point, a, b) - wall.thickness / 2
+    if (depth <= slop && depth < bestDepth) {
+      best = wall
+      bestDepth = depth
+    }
+  }
+  return best
+}
+
+/**
  * The wall whose body the point lies on (nearest within `maxDist`), or undefined.
  * Hits at a wall's own endpoints are ignored — those are vertices, not a mid-wall
- * point — as are walls touching an excluded node.
+ * point — as are walls touching an excluded node. For click-picking a wall, use
+ * `wallUnderPoint` instead.
  */
 export function wallAtPoint(
   doc: SceneDocument,
@@ -131,8 +156,9 @@ export interface WallSplit {
 
 /**
  * Splits a wall at `pos`, replacing it with two halves joined by a new node that
- * inherit its thickness and height. The endpoints stay shared, so nothing is
- * GC'd. Returns the changeset, or undefined if the wall no longer exists.
+ * inherit its thickness, height and openings. The endpoints stay shared, so
+ * nothing is GC'd. Returns the changeset, or undefined if the wall no longer
+ * exists.
  */
 export function splitWallAt(doc: SceneDocument, wallId: string, pos: Vec2): WallSplit | undefined {
   const wall = findWall(doc, wallId)
@@ -140,8 +166,51 @@ export function splitWallAt(doc: SceneDocument, wallId: string, pos: Vec2): Wall
   const nodeId = addNode(doc, pos)
   const opts = { thickness: wall.thickness, height: wall.height }
   const added: [Wall, Wall] = [addWall(doc, wall.a, nodeId, opts), addWall(doc, nodeId, wall.b, opts)]
+  distributeOpenings(doc, wall, pos, added)
   doc.walls = doc.walls.filter((w) => w.id !== wallId)
   return { nodeId, removed: wall, added }
+}
+
+/**
+ * Hands each of the split wall's openings to the half it lands on. The B half
+ * starts at the split point, so its openings rebase by the split offset.
+ *
+ * An opening the split runs straight through does not survive: you built a wall
+ * through the door, so the door is gone. Undo restores it with the original wall.
+ *
+ * The originals are copied, never moved: `removed` is the very object the undo of
+ * AddWallCommand pushes back, so its openings must stay intact. Copying also
+ * keeps the ids, which is what lets redo replay the recorded halves and land on
+ * the same openings without recording anything extra.
+ */
+function distributeOpenings(doc: SceneDocument, wall: Wall, pos: Vec2, added: [Wall, Wall]): void {
+  if (wall.openings.length === 0) return
+  const { a, b } = wallSegment(doc, wall)
+  const splitOffset = projectOnSegment(pos, a, b).t * Math.hypot(b.x - a.x, b.y - a.y)
+  for (const opening of wall.openings) {
+    const start = opening.offset - opening.width / 2
+    const end = opening.offset + opening.width / 2
+    if (end <= splitOffset) {
+      added[0].openings.push({ ...opening })
+    } else if (start >= splitOffset) {
+      added[1].openings.push({ ...opening, offset: opening.offset - splitOffset })
+    }
+  }
+}
+
+/** A stored opening together with where it lives, since openings hang off walls. */
+export interface OpeningLocation {
+  wall: Wall
+  opening: Opening
+  index: number
+}
+
+export function findOpening(doc: SceneDocument, id: string): OpeningLocation | undefined {
+  for (const wall of doc.walls) {
+    const index = wall.openings.findIndex((opening) => opening.id === id)
+    if (index !== -1) return { wall, opening: wall.openings[index]!, index }
+  }
+  return undefined
 }
 
 /** Removes a wall and garbage-collects any endpoint left with no other walls. */

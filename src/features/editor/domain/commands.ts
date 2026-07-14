@@ -1,6 +1,7 @@
 import {
   addItem,
   addWallBetween,
+  findOpening,
   findWall,
   mergeNodes,
   moveItem,
@@ -16,7 +17,7 @@ import {
   type WallOptions,
 } from './operations'
 import { roomExclusiveWalls } from './rooms'
-import type { Item, Node, NodeId, SceneDocument, Vec2, Wall } from './types'
+import type { Item, Node, NodeId, Opening, SceneDocument, Vec2, Wall } from './types'
 
 /**
  * A reversible edit. Every document mutation goes through a command so the
@@ -369,5 +370,94 @@ export class MoveItemCommand implements Command {
 
   undo(doc: SceneDocument): void {
     moveItem(doc, this.itemId, this.from)
+  }
+}
+
+/**
+ * Adds a door or window to a wall. The opening arrives fully formed (id included)
+ * from the tool, so redo re-adds the very same one — the AddItemCommand idiom.
+ */
+export class AddOpeningCommand implements Command {
+  readonly label = 'Add opening'
+
+  constructor(
+    private readonly wallId: string,
+    private readonly opening: Opening,
+  ) {}
+
+  do(doc: SceneDocument): void {
+    findWall(doc, this.wallId)?.openings.push(this.opening)
+  }
+
+  undo(doc: SceneDocument): void {
+    const wall = findWall(doc, this.wallId)
+    if (!wall) return
+    wall.openings = wall.openings.filter((opening) => opening.id !== this.opening.id)
+  }
+}
+
+/** Deletes a door or window, putting it back where it was on undo. */
+export class RemoveOpeningCommand implements Command {
+  readonly label = 'Delete opening'
+  private removed?: { wallId: string; index: number; opening: Opening }
+
+  constructor(private readonly openingId: string) {}
+
+  do(doc: SceneDocument): void {
+    const found = findOpening(doc, this.openingId)
+    if (!found) return
+    this.removed = { wallId: found.wall.id, index: found.index, opening: found.opening }
+    found.wall.openings.splice(found.index, 1)
+  }
+
+  undo(doc: SceneDocument): void {
+    if (!this.removed) return
+    const wall = findWall(doc, this.removed.wallId)
+    // back at its old index, so the wall's openings come out exactly as they were
+    wall?.openings.splice(this.removed.index, 0, this.removed.opening)
+  }
+}
+
+/** The editable scalars of an opening; `kind` is not among them (see below). */
+export interface OpeningProps {
+  offset?: number
+  width?: number
+  height?: number
+  sill?: number
+}
+
+/**
+ * Edits an opening's dimensions or its position along the wall as one history
+ * entry — a partial patch, so the inspector and a drag both commit through it.
+ *
+ * `kind` is deliberately not patchable: turning a window into a door is a delete
+ * plus an add, and pretending otherwise would only add a branch nobody asked for.
+ */
+export class SetOpeningPropsCommand implements Command {
+  readonly label = 'Edit opening'
+  private before: OpeningProps = {}
+
+  constructor(
+    private readonly openingId: string,
+    private readonly props: OpeningProps,
+  ) {}
+
+  do(doc: SceneDocument): void {
+    const found = findOpening(doc, this.openingId)
+    if (!found) return
+    const { opening } = found
+    // re-captured on every do, so redo after an undo still restores the right values
+    this.before = {
+      offset: opening.offset,
+      width: opening.width,
+      height: opening.height,
+      sill: opening.sill,
+    }
+    Object.assign(opening, this.props)
+  }
+
+  undo(doc: SceneDocument): void {
+    const found = findOpening(doc, this.openingId)
+    if (found) Object.assign(found.opening, this.before)
   }
 }

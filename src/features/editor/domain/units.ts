@@ -1,5 +1,13 @@
 export const WALL_THICKNESS = 10
 export const WALL_HEIGHT = 270
+
+/** Defaults a freshly placed opening takes; everything is editable afterwards. */
+export const DOOR_WIDTH = 90
+export const DOOR_HEIGHT = 210
+export const WINDOW_WIDTH = 120
+export const WINDOW_HEIGHT = 120
+export const WINDOW_SILL = 90
+
 export const ITEM_SIZE = 60
 export const ITEM_HEIGHT = 75
 export const ITEM_COLOR = '#94a3b8'

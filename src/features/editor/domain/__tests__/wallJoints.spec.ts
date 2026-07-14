@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { computeWallGeometry } from '../wallJoints'
-import type { SceneDocument, Vec2, Wall } from '../../domain/types'
+import type { SceneDocument, Vec2, Wall } from '../types'
 
 /** Builds a doc from named node positions and walls referencing them. */
-function makeDoc(nodes: Record<string, Vec2>, walls: Array<Omit<Wall, 'height'>>): SceneDocument {
+function makeDoc(
+  nodes: Record<string, Vec2>,
+  walls: Array<Omit<Wall, 'height' | 'openings'>>,
+): SceneDocument {
   return {
     nodes: Object.fromEntries(Object.entries(nodes).map(([id, pos]) => [id, { id, pos }])),
-    walls: walls.map((w) => ({ height: 270, ...w })),
+    // joint geometry doesn't depend on either, so both take a default here
+    walls: walls.map((w) => ({ height: 270, openings: [], ...w })),
     items: [],
   }
 }

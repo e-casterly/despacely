@@ -9,6 +9,7 @@ import {
   docBounds,
   findItem,
   mergeNodes,
+  findOpening,
   findWall,
   moveItem,
   moveNode,
@@ -20,8 +21,13 @@ import {
   wallAtPoint,
   wallSegment,
   wallsAtNode,
+  wallUnderPoint,
 } from '../operations'
-import type { Item } from '../types'
+import type { Item, Opening } from '../types'
+
+function makeOpening(id: string, overrides: Partial<Opening> = {}): Opening {
+  return { id, kind: 'door', offset: 50, width: 20, height: 210, sill: 0, ...overrides }
+}
 
 function makeItem(id = 'i1'): Item {
   return {
@@ -344,5 +350,111 @@ describe('splitWallAt', () => {
   it('returns undefined for a wall that no longer exists', () => {
     const doc = createEmptyDocument()
     expect(splitWallAt(doc, 'gone', { x: 0, y: 0 })).toBeUndefined()
+  })
+})
+
+describe('splitWallAt (openings)', () => {
+  /** A 200cm wall carrying: one opening left of centre, one right, one across it. */
+  function docWithOpenings() {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b)
+    wall.openings = [
+      makeOpening('left', { offset: 40, width: 20 }), // [30, 50]
+      makeOpening('right', { offset: 160, width: 20 }), // [150, 170]
+      makeOpening('across', { offset: 100, width: 40 }), // [80, 120] — spans the split
+    ]
+    return { doc, wall }
+  }
+
+  it('hands each opening to the half it lands on, rebasing the B half', () => {
+    const { doc, wall } = docWithOpenings()
+
+    const [first, second] = splitWallAt(doc, wall.id, { x: 100, y: 0 })!.added
+
+    // the A half starts where the original did, so its offsets are unchanged
+    expect(first.openings).toEqual([makeOpening('left', { offset: 40, width: 20 })])
+    // the B half starts at the split point, 100cm along, so 160 becomes 60
+    expect(second.openings).toEqual([makeOpening('right', { offset: 60, width: 20 })])
+  })
+
+  it('drops an opening the split runs straight through', () => {
+    const { doc, wall } = docWithOpenings()
+
+    const { added } = splitWallAt(doc, wall.id, { x: 100, y: 0 })!
+
+    const survivors = added.flatMap((half) => half.openings.map((o) => o.id))
+    expect(survivors).not.toContain('across')
+  })
+
+  it('leaves the removed wall’s own openings intact, so undo can restore them', () => {
+    const { doc, wall } = docWithOpenings()
+
+    const { removed } = splitWallAt(doc, wall.id, { x: 100, y: 0 })!
+
+    // `removed` is the object AddWallCommand pushes back on undo: it must still
+    // carry all three openings, including the one the halves dropped
+    expect(removed.openings.map((o) => o.id)).toEqual(['left', 'right', 'across'])
+    expect(removed.openings[1]!.offset).toBe(160) // not rebased in place
+  })
+
+  it('gives the halves copies, so editing one cannot reach the original', () => {
+    const { doc, wall } = docWithOpenings()
+
+    const [first] = splitWallAt(doc, wall.id, { x: 100, y: 0 })!.added
+    first.openings[0]!.offset = 999
+
+    expect(wall.openings[0]!.offset).toBe(40)
+  })
+
+  it('keeps opening ids across the split, so a selected door survives it', () => {
+    const { doc, wall } = docWithOpenings()
+
+    const [first] = splitWallAt(doc, wall.id, { x: 100, y: 0 })!.added
+
+    expect(first.openings[0]!.id).toBe('left')
+    expect(findOpening(doc, 'left')?.wall.id).toBe(first.id)
+  })
+})
+
+describe('findOpening', () => {
+  it('finds an opening with its wall and index', () => {
+    const doc = createEmptyDocument()
+    const wall = addWall(doc, addNode(doc, { x: 0, y: 0 }), addNode(doc, { x: 200, y: 0 }))
+    wall.openings = [makeOpening('o1'), makeOpening('o2')]
+
+    const found = findOpening(doc, 'o2')!
+
+    expect(found.wall.id).toBe(wall.id)
+    expect(found.index).toBe(1)
+    expect(found.opening.id).toBe('o2')
+  })
+
+  it('returns undefined for an unknown id', () => {
+    expect(findOpening(createEmptyDocument(), 'nope')).toBeUndefined()
+  })
+})
+
+describe('wallUnderPoint', () => {
+  it('picks the wall whose body the point sits deepest inside', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const thick = addWall(doc, a, b, { thickness: 40 })
+    const c = addNode(doc, { x: 0, y: 15 })
+    const d = addNode(doc, { x: 100, y: 15 })
+    addWall(doc, c, d, { thickness: 2 })
+
+    // 12cm below the thick wall's axis: inside its body, but nearer the thin
+    // wall's axis — depth into the body must win over raw axis distance
+    expect(wallUnderPoint(doc, { x: 50, y: 12 }, 0)?.id).toBe(thick.id)
+  })
+
+  it('returns undefined when the point is outside every wall body', () => {
+    const doc = createEmptyDocument()
+    addWall(doc, addNode(doc, { x: 0, y: 0 }), addNode(doc, { x: 100, y: 0 }))
+
+    expect(wallUnderPoint(doc, { x: 50, y: 500 }, 5)).toBeUndefined()
   })
 })

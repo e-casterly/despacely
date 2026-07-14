@@ -6,7 +6,7 @@ import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 import type { Selection, ToolOverlay } from '../tools/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
-import { computeWallGeometry, type WallFaces, type WallGeometry } from './wallJoints'
+import { computeWallGeometry, type WallFaces, type WallGeometry } from '../domain/wallJoints'
 
 export interface CanvasPalette {
   background: string
@@ -189,7 +189,9 @@ function augmentWithGhost(
     const b = resolve(seg.b)
     if (a === b) return
     const id = `${GHOST_ID}wall${i}`
-    walls.push({ id, a, b, thickness: WALL_THICKNESS, height: WALL_HEIGHT })
+    // a ghost wall is openings-free by construction — nothing has been placed in
+    // it yet, so every openings lookup keyed by wall id simply misses it
+    walls.push({ id, a, b, thickness: WALL_THICKNESS, height: WALL_HEIGHT, openings: [] })
     ghostIds.add(id)
   })
   if (ghostIds.size === 0) return null

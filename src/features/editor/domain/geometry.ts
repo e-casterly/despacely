@@ -1,14 +1,33 @@
 import type { Vec2 } from './types'
 
-/** Distance from a point to a line segment; used for wall hit-testing. */
-export function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+/** Where a point lands when dropped perpendicularly onto a segment. */
+export interface Projection {
+  /** the nearest point on the segment itself */
+  point: Vec2
+  /** how far along a→b that point sits, clamped to [0, 1] */
+  t: number
+  distance: number
+}
+
+/**
+ * Projects a point onto segment a→b, clamped to the segment's ends. `t` is what
+ * callers positioning something *along* a wall need (an opening's offset, a split
+ * point); `distToSegment` is the same math when only the distance matters.
+ */
+export function projectOnSegment(p: Vec2, a: Vec2, b: Vec2): Projection {
   const abx = b.x - a.x
   const aby = b.y - a.y
   const lengthSq = abx * abx + aby * aby
-  if (lengthSq === 0) return Math.hypot(p.x - a.x, p.y - a.y)
+  if (lengthSq === 0) return { point: { ...a }, t: 0, distance: Math.hypot(p.x - a.x, p.y - a.y) }
 
   const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / lengthSq))
-  return Math.hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby))
+  const point = { x: a.x + t * abx, y: a.y + t * aby }
+  return { point, t, distance: Math.hypot(p.x - point.x, p.y - point.y) }
+}
+
+/** Distance from a point to a line segment; used for wall hit-testing. */
+export function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  return projectOnSegment(p, a, b).distance
 }
 
 /** Area-weighted centroid of a simple polygon; vertex mean when the area is zero. */

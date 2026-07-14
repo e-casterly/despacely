@@ -21,4 +21,32 @@ describe('parseDocument', () => {
   it('rejects malformed wall/item collections', () => {
     expect(() => parseDocument({ nodes: {}, walls: {}, items: [] })).toThrow(/malformed/)
   })
+
+  it('gives walls saved before openings existed an empty openings array', () => {
+    const legacy = {
+      nodes: { n1: { id: 'n1', pos: { x: 0, y: 0 } }, n2: { id: 'n2', pos: { x: 100, y: 0 } } },
+      walls: [{ id: 'w1', a: 'n1', b: 'n2', thickness: 10, height: 270 }],
+      items: [],
+    }
+
+    const doc = parseDocument(legacy)
+
+    // without this, the first opening placed into an old project would throw
+    expect(doc.walls[0]!.openings).toEqual([])
+  })
+
+  it('leaves openings alone on a document that already has them', () => {
+    const doc = createEmptyDocument()
+    const opening = { id: 'o1', kind: 'door' as const, offset: 50, width: 90, height: 210, sill: 0 }
+    doc.walls.push({
+      id: 'w1',
+      a: 'n1',
+      b: 'n2',
+      thickness: 10,
+      height: 270,
+      openings: [opening],
+    })
+
+    expect(parseDocument(doc).walls[0]!.openings).toEqual([opening])
+  })
 })

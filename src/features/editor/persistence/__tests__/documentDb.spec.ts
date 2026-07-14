@@ -13,7 +13,7 @@ describe('documentDb', () => {
     const doc = createEmptyDocument()
     doc.nodes.n1 = { id: 'n1', pos: { x: 0, y: 0 } }
     doc.nodes.n2 = { id: 'n2', pos: { x: 100, y: 0 } }
-    doc.walls.push({ id: 'w1', a: 'n1', b: 'n2', thickness: 10, height: 270 })
+    doc.walls.push({ id: 'w1', a: 'n1', b: 'n2', thickness: 10, height: 270, openings: [] })
 
     await documentDb.save('p1', doc)
     const loaded = await documentDb.get('p1')

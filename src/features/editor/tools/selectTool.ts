@@ -1,28 +1,9 @@
 import { MergeNodesCommand, MoveNodeCommand, MoveNodesCommand } from '../domain/commands'
-import { distToSegment } from '../domain/geometry'
-import { collapsesAWall, nodeAt, nodesConnected, wallSegment } from '../domain/operations'
+import { collapsesAWall, nodeAt, nodesConnected, wallUnderPoint } from '../domain/operations'
 import { roomAt, roomKey } from '../domain/rooms'
 import { resolveSnap, type Guide } from '../domain/snapping'
-import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
+import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolOverlay } from './types'
-
-/** The wall the point sits deepest inside, within a pick tolerance (cm). */
-function pickWall(doc: SceneDocument, point: Vec2, slop: number): Wall | undefined {
-  let best: Wall | undefined
-  let bestDepth = Infinity
-  for (const wall of doc.walls) {
-    const { a, b } = wallSegment(doc, wall)
-    // Depth relative to the wall's surface (negative inside the body). Ranking
-    // by depth, not by raw distance to the axis, so that next to a seam a thick
-    // wall's body beats a thin neighbour whose axis happens to be closer.
-    const depth = distToSegment(point, a, b) - wall.thickness / 2
-    if (depth <= slop && depth < bestDepth) {
-      best = wall
-      bestDepth = depth
-    }
-  }
-  return best
-}
 
 function samePoint(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y
@@ -127,7 +108,7 @@ export function createSelectTool(): Tool {
         }
         return
       }
-      const wall = pickWall(ctx.doc, input.world, ctx.snapDist)
+      const wall = wallUnderPoint(ctx.doc, input.world, ctx.snapDist)
       if (wall) {
         ctx.select({ kind: 'wall', id: wall.id })
         drag = {
