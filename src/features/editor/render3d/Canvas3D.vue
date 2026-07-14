@@ -5,7 +5,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { useEditorStore } from '../store/editorStore'
 import { computeWallGeometry } from '../render2d/wallJoints'
 import { docBounds } from '../domain/operations'
-import type { SceneDocument } from '../domain/types'
+import { detectRooms } from '../domain/rooms'
+import type { SceneDocument, Vec2 } from '../domain/types'
 
 const editor = useEditorStore()
 const container = useTemplateRef('container')
@@ -36,19 +37,29 @@ function requestRender() {
   })
 }
 
-/**
- * Extrudes each wall's 2D footprint up to its own height. The footprint comes
- * from the same mitred geometry the 2D canvas draws, so corners join identically.
- * Mapping (types.ts): plan (x, y) -> three (x, height, y), Y up. ExtrudeGeometry
- * builds a shape in XY and pushes it along +Z, so we feed points (x, -y) and lay
- * the solid down with rotateX(-90°): a vertex (x, -y, z) becomes (x, z, y).
- */
 /** Light neutral so lighting shows the wall faces apart (not tied to a token). */
 const WALL_COLOR = 0xdfe3ea
+/** Light indigo, echoing the 2D room fill (--color-room) so both views read alike. */
+const FLOOR_COLOR = 0xe4e6f6
+/** Lifts the floors a hair off y=0 so they don't z-fight the ground grid. */
+const FLOOR_LIFT = 0.2
+
+/**
+ * Plan point -> shape point. three builds shapes in XY and pushes them along +Z,
+ * and we lay the result down with rotateX(-90°), which sends (x, y, z) to
+ * (x, z, -y). Feeding (x, -y) therefore lands a vertex at (x, z, y): exactly the
+ * documented mapping plan (x, y) -> three (x, height, y), Y up (see types.ts).
+ */
+function planToShape(p: Vec2): THREE.Vector2 {
+  return new THREE.Vector2(p.x, -p.y)
+}
 
 function buildContent(doc: SceneDocument): THREE.Group {
   const group = new THREE.Group()
-  const material = new THREE.MeshLambertMaterial({
+
+  // Walls: each one's 2D footprint extruded to its own height. The footprint is
+  // the same mitred geometry the 2D canvas draws, so corners join identically.
+  const wallMaterial = new THREE.MeshLambertMaterial({
     color: WALL_COLOR,
     side: THREE.DoubleSide,
   })
@@ -56,11 +67,29 @@ function buildContent(doc: SceneDocument): THREE.Group {
   for (const wall of doc.walls) {
     const polygon = polygons.get(wall.id)
     if (!polygon || polygon.length < 3) continue
-    const shape = new THREE.Shape(polygon.map((p) => new THREE.Vector2(p.x, -p.y)))
+    const shape = new THREE.Shape(polygon.map(planToShape))
     const geometry = new THREE.ExtrudeGeometry(shape, { depth: wall.height, bevelEnabled: false })
     geometry.rotateX(-Math.PI / 2)
-    group.add(new THREE.Mesh(geometry, material))
+    group.add(new THREE.Mesh(geometry, wallMaterial))
   }
+
+  // Floors: rooms are derived from the wall graph, never stored. A nested
+  // detached loop is not floor, so it becomes a hole in the slab — the same
+  // carve-out the 2D canvas fills with the evenodd rule.
+  const floorMaterial = new THREE.MeshLambertMaterial({
+    color: FLOOR_COLOR,
+    side: THREE.DoubleSide,
+  })
+  for (const room of detectRooms(doc)) {
+    const shape = new THREE.Shape(room.polygon.map(planToShape))
+    for (const hole of room.holes) shape.holes.push(new THREE.Path(hole.map(planToShape)))
+    const geometry = new THREE.ShapeGeometry(shape)
+    geometry.rotateX(-Math.PI / 2)
+    const floor = new THREE.Mesh(geometry, floorMaterial)
+    floor.position.y = FLOOR_LIFT
+    group.add(floor)
+  }
+
   return group
 }
 
@@ -106,7 +135,9 @@ function frameCamera() {
   const halfFov = ((camera.fov / 2) * Math.PI) / 180
   const distance = (radius / Math.sin(halfFov)) * 1.15 // margin so nothing clips the edge
 
-  const dir = new THREE.Vector3(1, 0.8, 1).normalize()
+  // ~47° above the horizon: a dollhouse view that clears the walls, so you see
+  // the room floors on entry rather than just the outside of the box
+  const dir = new THREE.Vector3(1, 1.5, 1).normalize()
   controls.target.set(center.x, height / 2, center.z)
   camera.position.copy(controls.target).addScaledVector(dir, distance)
   camera.updateProjectionMatrix()
