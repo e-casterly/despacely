@@ -64,6 +64,7 @@ let palette: CanvasPalette = {
   room: 'rgb(99 102 241 / 0.1)',
   roomLabel: '#64748b',
   wall: '#1e293b',
+  opening: '#64748b',
   accent: '#6366f1',
 }
 let dpr = 1
@@ -97,6 +98,7 @@ function readPalette(): CanvasPalette {
     room: token('--color-room', palette.room),
     roomLabel: token('--color-text-muted', palette.roomLabel),
     wall: token('--color-text', palette.wall),
+    opening: token('--color-opening', palette.opening),
     accent: token('--color-primary', palette.accent),
   }
 }

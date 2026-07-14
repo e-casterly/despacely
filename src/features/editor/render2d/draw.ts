@@ -1,5 +1,10 @@
 import { pointInPolygon, polygonCentroid } from '../domain/geometry'
-import { fittingOpenings, openingRect, type FittedOpening } from '../domain/openings'
+import {
+  fittingOpenings,
+  openingRect,
+  type FittedOpening,
+  type OpeningSpan,
+} from '../domain/openings'
 import { nodeAt } from '../domain/operations'
 import type { Guide } from '../domain/snapping'
 import { detectRooms, roomKey, type Room } from '../domain/rooms'
@@ -17,6 +22,7 @@ export interface CanvasPalette {
   room: string
   roomLabel: string
   wall: string
+  opening: string
   accent: string
 }
 
@@ -84,6 +90,7 @@ export function render(
       selectedWallId,
       ghost?.ghostIds ?? null,
     )
+    drawOpenings(ctx, vp, ghost?.doc ?? viewDoc, openings, rooms, palette)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
     drawRoomLabels(ctx, vp, rooms, palette)
@@ -548,6 +555,141 @@ function fillWallShape(ctx: CanvasRenderingContext2D, ring: Vec2[], holes: Vec2[
   tracePoly(ctx, ring)
   for (const hole of holes) tracePoly(ctx, hole)
   ctx.fill('evenodd')
+}
+
+/** Stroke width (screen px) of the door/window symbols drawn inside the gaps. */
+const OPENING_SYMBOL_PX = 1
+/** How far off the centerline the two glazing lines of a window sit, as a share
+ *  of the wall's thickness — enough to read as a pane, narrow enough to stay clear
+ *  of the jambs. */
+const WINDOW_PANE_INSET = 1 / 6
+
+/** Which side of a wall a door swings towards: +1 is the wall's left, (-dy, dx). */
+export type SwingSide = 1 | -1
+
+/** The plan symbol for a door: the leaf standing open, and the arc it sweeps. */
+export interface DoorSwing {
+  /** the jamb the door is hung on (the one nearer node A) */
+  hinge: Vec2
+  /** the tip of the leaf when the door stands fully open, square to the wall */
+  leafTip: Vec2
+  /** the far jamb — where the arc lands, i.e. the door shut */
+  latch: Vec2
+  radius: number
+  startAngle: number
+  endAngle: number
+  counterclockwise: boolean
+}
+
+/**
+ * The door's leaf and swing arc: hinged on the jamb nearer node A, opening a
+ * quarter turn to `side`. The arc runs from the open leaf back to the far jamb,
+ * so its radius is the door's own width — the way a plan draws it.
+ */
+export function doorSwing(span: OpeningSpan, side: SwingSide): DoorSwing {
+  const radius = span.end - span.start
+  const swing = { x: -span.axis.y * side, y: span.axis.x * side }
+  const hinge = span.jambA
+  const leafTip = { x: hinge.x + swing.x * radius, y: hinge.y + swing.y * radius }
+
+  const startAngle = Math.atan2(swing.y, swing.x)
+  const endAngle = Math.atan2(span.axis.y, span.axis.x)
+  // the two are a quarter turn apart; sweep the short way round, whichever way
+  // that is once the wall's direction and the swing side are taken together
+  let delta = endAngle - startAngle
+  while (delta > Math.PI) delta -= 2 * Math.PI
+  while (delta <= -Math.PI) delta += 2 * Math.PI
+
+  return {
+    hinge,
+    leafTip,
+    latch: span.jambB,
+    radius,
+    startAngle,
+    endAngle,
+    counterclockwise: delta < 0,
+  }
+}
+
+/** The window's two glazing lines, each running jamb to jamb alongside the centerline. */
+export function windowPanes(span: OpeningSpan, thickness: number): [Vec2, Vec2][] {
+  const inset = thickness * WINDOW_PANE_INSET
+  const left = { x: -span.axis.y, y: span.axis.x }
+  const pane = (sign: SwingSide): [Vec2, Vec2] => [
+    { x: span.jambA.x + left.x * inset * sign, y: span.jambA.y + left.y * inset * sign },
+    { x: span.jambB.x + left.x * inset * sign, y: span.jambB.y + left.y * inset * sign },
+  ]
+  return [pane(1), pane(-1)]
+}
+
+/**
+ * Which way a door should open: into the room, when exactly one side of it is one.
+ *
+ * Probes just past each face at the door's midpoint. A door between two rooms (or
+ * between none) has no better answer, so it falls back to the wall's left — an
+ * arbitrary but stable convention, not a guess dressed up as one.
+ */
+export function doorSwingSide(rooms: Room[], span: OpeningSpan, thickness: number): SwingSide {
+  const mid = {
+    x: (span.jambA.x + span.jambB.x) / 2,
+    y: (span.jambA.y + span.jambB.y) / 2,
+  }
+  const left = { x: -span.axis.y, y: span.axis.x }
+  const reach = thickness / 2 + 1
+  const probe = (sign: SwingSide): Vec2 => ({
+    x: mid.x + left.x * reach * sign,
+    y: mid.y + left.y * reach * sign,
+  })
+  const encloses = (p: Vec2): boolean =>
+    rooms.some(
+      (room) =>
+        pointInPolygon(p, room.polygon) && !room.holes.some((hole) => pointInPolygon(p, hole)),
+    )
+
+  const onLeft = encloses(probe(1))
+  const onRight = encloses(probe(-1))
+  if (onRight && !onLeft) return -1
+  return 1
+}
+
+/** Door and window symbols, drawn inside the gaps the walls were cut open for. */
+function drawOpenings(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  doc: SceneDocument,
+  openings: Map<string, FittedOpening[]>,
+  rooms: Room[],
+  palette: CanvasPalette,
+): void {
+  if (openings.size === 0) return
+  ctx.strokeStyle = palette.opening
+  ctx.lineWidth = OPENING_SYMBOL_PX / vp.zoom
+  ctx.lineCap = 'round'
+
+  for (const wall of doc.walls) {
+    for (const { opening, span } of openings.get(wall.id) ?? []) {
+      ctx.beginPath()
+      if (opening.kind === 'window') {
+        for (const [from, to] of windowPanes(span, wall.thickness)) {
+          ctx.moveTo(from.x, from.y)
+          ctx.lineTo(to.x, to.y)
+        }
+      } else {
+        const swing = doorSwing(span, doorSwingSide(rooms, span, wall.thickness))
+        ctx.moveTo(swing.hinge.x, swing.hinge.y)
+        ctx.lineTo(swing.leafTip.x, swing.leafTip.y)
+        ctx.arc(
+          swing.hinge.x,
+          swing.hinge.y,
+          swing.radius,
+          swing.startAngle,
+          swing.endAngle,
+          swing.counterclockwise,
+        )
+      }
+      ctx.stroke()
+    }
+  }
 }
 
 /** Appends one closed ring to the current path (no fill). */

@@ -22,6 +22,9 @@
   --color-grid-strong: #cbd5e1;
   /* room fill: translucent so the grid shows through and nested rooms stack darker */
   --color-room: rgb(99 102 241 / 0.1);
+  /* door/window symbols: a mid slate, so they read as a secondary line inside the
+     gap rather than competing with the wall they are cut into */
+  --color-opening: #64748b;
 
   /* feedback */
   --color-danger: #ef4444;
