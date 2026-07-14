@@ -1,4 +1,5 @@
 import { MergeNodesCommand, MoveNodeCommand, MoveNodesCommand } from '../domain/commands'
+import { openingAtPoint } from '../domain/openings'
 import { collapsesAWall, nodeAt, nodesConnected, wallUnderPoint } from '../domain/operations'
 import { roomAt, roomKey } from '../domain/rooms'
 import { resolveSnap, type Guide } from '../domain/snapping'
@@ -106,6 +107,14 @@ export function createSelectTool(): Tool {
           mergeInto: null,
           guides: [],
         }
+        return
+      }
+      // An opening lives inside a wall's body, so it has to be offered the point
+      // before the wall is — otherwise the wall pick would always swallow it.
+      // It has no drag of its own yet, so selecting it is all that happens.
+      const opening = openingAtPoint(ctx.doc, input.world)
+      if (opening) {
+        ctx.select({ kind: 'opening', id: opening.opening.id })
         return
       }
       const wall = wallUnderPoint(ctx.doc, input.world, ctx.snapDist)

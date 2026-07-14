@@ -383,3 +383,49 @@ describe('selectTool wall drag', () => {
     expect(apply).not.toHaveBeenCalled()
   })
 })
+
+describe('selectTool openings', () => {
+  /** The wall from docWithWall, with a 40cm door centred at 100 along it. */
+  function docWithOpening() {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b, { thickness: 20 })
+    wall.openings = [
+      { id: 'o1', kind: 'door', offset: 100, width: 40, height: 210, sill: 0 }, // [80, 120]
+    ]
+    return { doc, wall }
+  }
+
+  it('selects the opening, not the wall it is cut into', () => {
+    const { doc } = docWithOpening()
+    const { ctx, select } = ctxFor(doc)
+
+    // dead centre of the doorway — which is also squarely inside the wall's body,
+    // so the wall pick would happily claim it if the opening were not asked first
+    createSelectTool().onPointerDown!(at(100, 0), ctx)
+
+    expect(select).toHaveBeenCalledWith({ kind: 'opening', id: 'o1' })
+  })
+
+  it('still selects the wall when the click lands beside the opening', () => {
+    const { doc, wall } = docWithOpening()
+    const { ctx, select } = ctxFor(doc)
+
+    createSelectTool().onPointerDown!(at(40, 0), ctx)
+
+    expect(select).toHaveBeenCalledWith({ kind: 'wall', id: wall.id })
+  })
+
+  it('starts no drag on an opening, so the wall underneath cannot be moved by it', () => {
+    const { doc } = docWithOpening()
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 0), ctx)
+    tool.onPointerMove!(at(160, 60), ctx)
+    tool.onPointerUp!(at(160, 60), ctx)
+
+    expect(apply).not.toHaveBeenCalled()
+  })
+})

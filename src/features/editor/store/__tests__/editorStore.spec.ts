@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { isReactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToastStore } from '@/stores/toasts'
-import { AddItemCommand, AddWallCommand } from '../../domain/commands'
+import { AddItemCommand, AddOpeningCommand, AddWallCommand } from '../../domain/commands'
 import { createEmptyDocument } from '../../domain/operations'
-import type { Item } from '../../domain/types'
+import type { Item, Opening } from '../../domain/types'
 import { documentDb } from '../../persistence/documentDb'
 import { AUTOSAVE_DELAY_MS, useEditorStore } from '../editorStore'
 
@@ -236,6 +236,34 @@ describe('deleteSelection', () => {
   it('a stale selection only clears, adding nothing to history', async () => {
     const store = await openedStore()
     store.select({ kind: 'wall', id: 'long-gone' })
+
+    store.deleteSelection()
+
+    expect(store.selection).toBeNull()
+    expect(store.canUndo).toBe(false)
+  })
+
+  it('deletes the selected opening, leaving its wall standing', async () => {
+    const store = await openedStore()
+    store.apply(new AddWallCommand({ x: 0, y: 0 }, { x: 400, y: 0 }))
+    const wall = store.doc!.walls[0]!
+    const opening: Opening = { id: 'o1', kind: 'door', offset: 200, width: 90, height: 210, sill: 0 }
+    store.apply(new AddOpeningCommand(wall.id, opening))
+
+    store.select({ kind: 'opening', id: 'o1' })
+    store.deleteSelection()
+
+    expect(store.doc!.walls).toHaveLength(1) // the wall is not collateral
+    expect(store.doc!.walls[0]!.openings).toEqual([])
+    expect(store.selection).toBeNull()
+
+    store.undo()
+    expect(store.doc!.walls[0]!.openings).toEqual([opening])
+  })
+
+  it('a stale opening selection only clears, adding nothing to history', async () => {
+    const store = await openedStore()
+    store.select({ kind: 'opening', id: 'long-gone' })
 
     store.deleteSelection()
 

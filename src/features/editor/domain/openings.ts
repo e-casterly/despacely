@@ -1,6 +1,7 @@
+import { pointInPolygon } from './geometry'
 import { wallSegment } from './operations'
 import type { Opening, SceneDocument, Vec2, Wall } from './types'
-import type { WallFaces, WallGeometry } from './wallJoints'
+import { computeWallGeometry, type WallFaces, type WallGeometry } from './wallJoints'
 
 /**
  * Where an opening actually sits on its wall, in the wall's own frame.
@@ -140,6 +141,33 @@ export function offsetRange(
   const min = clear.from + width / 2
   const max = clear.to - width / 2
   return min > max ? null : { min, max }
+}
+
+/** An opening the pointer is over, with the wall it belongs to and where it sits. */
+export interface OpeningHit {
+  wall: Wall
+  opening: Opening
+  span: OpeningSpan
+}
+
+/**
+ * The opening whose cut-out the point lands in, or undefined.
+ *
+ * An opening sits *inside* a wall's body, so anything picking walls by proximity
+ * would swallow it — callers must offer the point here first (see selectTool's
+ * pick order). Only openings that currently fit can be hit: one that isn't drawn
+ * cannot be clicked.
+ */
+export function openingAtPoint(doc: SceneDocument, point: Vec2): OpeningHit | undefined {
+  const openings = fittingOpenings(doc, computeWallGeometry(doc))
+  for (const wall of doc.walls) {
+    for (const { opening, span } of openings.get(wall.id) ?? []) {
+      if (pointInPolygon(point, openingRect(span, wall.thickness))) {
+        return { wall, opening, span }
+      }
+    }
+  }
+  return undefined
 }
 
 /**

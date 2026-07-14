@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   fittingOpenings,
   offsetRange,
+  openingAtPoint,
   openingRect,
   openingSpan,
   overlapsAnotherOpening,
@@ -195,6 +196,45 @@ describe('overlapsAnotherOpening', () => {
     const wall = wallWith(makeOpening('o1', { offset: 50, width: 20 }))
 
     expect(overlapsAnotherOpening(wall, makeOpening('o1', { offset: 55, width: 40 }))).toBe(false)
+  })
+})
+
+describe('openingAtPoint', () => {
+  /** A 20cm-thick wall east along y=0 with a 40cm opening centred on x=100. */
+  function docWithOpening() {
+    const { doc, wall } = straightWall(200, 20)
+    wall.openings = [makeOpening('o1', { offset: 100, width: 40 })] // [80, 120]
+    return { doc, wall }
+  }
+
+  it('finds the opening the point lands in', () => {
+    const { doc, wall } = docWithOpening()
+
+    const hit = openingAtPoint(doc, { x: 100, y: 5 })!
+
+    expect(hit.opening.id).toBe('o1')
+    expect(hit.wall.id).toBe(wall.id)
+  })
+
+  it('misses a point on the wall beside the opening', () => {
+    const { doc } = docWithOpening()
+
+    expect(openingAtPoint(doc, { x: 50, y: 5 })).toBeUndefined()
+  })
+
+  it('misses a point beyond the wall faces, level with the opening', () => {
+    const { doc } = docWithOpening()
+
+    // the wall is 20 thick, so ±10 is its face; 15 is outside it
+    expect(openingAtPoint(doc, { x: 100, y: 15 })).toBeUndefined()
+  })
+
+  it('cannot hit an opening that does not currently fit', () => {
+    const { doc, wall } = docWithOpening()
+    // an opening wider than its wall is never drawn — so it must not be clickable
+    wall.openings = [makeOpening('o1', { offset: 100, width: 400 })]
+
+    expect(openingAtPoint(doc, { x: 100, y: 0 })).toBeUndefined()
   })
 })
 

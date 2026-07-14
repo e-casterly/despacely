@@ -1,8 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, shallowRef } from 'vue'
 import { useToastStore } from '@/stores/toasts'
-import { RemoveNodeCommand, RemoveRoomCommand, RemoveWallCommand, type Command } from '../domain/commands'
-import { createEmptyDocument, findNode, findWall } from '../domain/operations'
+import {
+  RemoveNodeCommand,
+  RemoveOpeningCommand,
+  RemoveRoomCommand,
+  RemoveWallCommand,
+  type Command,
+} from '../domain/commands'
+import { createEmptyDocument, findNode, findOpening, findWall } from '../domain/operations'
 import { findRoom, roomExclusiveWalls } from '../domain/rooms'
 import type { SceneDocument } from '../domain/types'
 import type { Selection } from '../tools/types'
@@ -83,7 +89,7 @@ export const useEditorStore = defineStore('editor', () => {
     scheduleSave()
   }
 
-  /** Deletes the selected wall or vertex (with its walls) as one undoable command. */
+  /** Deletes whatever is selected as one undoable command. */
   function deleteSelection() {
     if (!doc.value || !selection.value) return
     const target = selection.value
@@ -93,7 +99,13 @@ export const useEditorStore = defineStore('editor', () => {
       if (findWall(doc.value, target.id)) apply(new RemoveWallCommand(target.id))
     } else if (target.kind === 'node') {
       if (findNode(doc.value, target.id)) apply(new RemoveNodeCommand(target.id))
-    } else if (findRoom(doc.value, target.id)) {
+    } else if (target.kind === 'opening') {
+      if (findOpening(doc.value, target.id)) apply(new RemoveOpeningCommand(target.id))
+    } else if (target.kind === 'room' && findRoom(doc.value, target.id)) {
+      // named explicitly rather than left as a trailing else: this branch used to
+      // catch anything that wasn't a wall or a vertex, so a new kind of selection
+      // would quietly be treated as a room and do nothing
+      //
       // a room fully enclosed by neighbours has nothing of its own to delete;
       // explain instead of pushing an empty history entry
       if (roomExclusiveWalls(doc.value, target.id).length === 0) {

@@ -60,6 +60,7 @@ export function render(
   const selectedWallId = view.selection?.kind === 'wall' ? view.selection.id : null
   const selectedNodeId = view.selection?.kind === 'node' ? view.selection.id : null
   const selectedRoomKey = view.selection?.kind === 'room' ? view.selection.id : null
+  const selectedOpeningId = view.selection?.kind === 'opening' ? view.selection.id : null
   // The doc as the user currently sees it: a drag preview overrides node
   // positions on a render-only copy, so the real document stays untouched
   // until the move is committed as a command.
@@ -90,7 +91,7 @@ export function render(
       selectedWallId,
       ghost?.ghostIds ?? null,
     )
-    drawOpenings(ctx, vp, ghost?.doc ?? viewDoc, openings, rooms, palette)
+    drawOpenings(ctx, vp, ghost?.doc ?? viewDoc, openings, rooms, palette, selectedOpeningId)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
     drawRoomLabels(ctx, vp, rooms, palette)
@@ -652,6 +653,13 @@ export function doorSwingSide(rooms: Room[], span: OpeningSpan, thickness: numbe
   return 1
 }
 
+/**
+ * Wash of accent marking the selected opening. It has to be translucent, like a
+ * selected room's: an opening is a hole, and an opaque fill would plug it,
+ * covering the very floor you cut the doorway to see through.
+ */
+const SELECTED_OPENING_ALPHA = 0.25
+
 /** Door and window symbols, drawn inside the gaps the walls were cut open for. */
 function drawOpenings(
   ctx: CanvasRenderingContext2D,
@@ -660,14 +668,25 @@ function drawOpenings(
   openings: Map<string, FittedOpening[]>,
   rooms: Room[],
   palette: CanvasPalette,
+  selectedOpeningId: string | null,
 ): void {
   if (openings.size === 0) return
-  ctx.strokeStyle = palette.opening
   ctx.lineWidth = OPENING_SYMBOL_PX / vp.zoom
   ctx.lineCap = 'round'
 
   for (const wall of doc.walls) {
     for (const { opening, span } of openings.get(wall.id) ?? []) {
+      const selected = opening.id === selectedOpeningId
+      if (selected) {
+        ctx.globalAlpha = SELECTED_OPENING_ALPHA
+        ctx.fillStyle = palette.accent
+        ctx.beginPath()
+        tracePoly(ctx, openingRect(span, wall.thickness))
+        ctx.fill()
+        ctx.globalAlpha = 1
+      }
+
+      ctx.strokeStyle = selected ? palette.accent : palette.opening
       ctx.beginPath()
       if (opening.kind === 'window') {
         for (const [from, to] of windowPanes(span, wall.thickness)) {
