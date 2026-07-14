@@ -15,7 +15,7 @@ const emit = defineEmits<{
 }>()
 
 // clicking the active tool returns to the neutral 'select' mode
-function toggle(tool: 'wall' | 'room') {
+function toggle(tool: Exclude<ToolId, 'select'>) {
   emit('select-tool', activeTool === tool ? 'select' : tool)
 }
 </script>
@@ -40,6 +40,26 @@ function toggle(tool: 'wall' | 'room') {
       @click="toggle('room')"
     >
       Draw room
+    </BaseButton>
+
+    <BaseButton
+      :variant="activeTool === 'door' ? 'primary' : 'ghost'"
+      icon="door"
+      class="w-full justify-start"
+      :aria-pressed="activeTool === 'door'"
+      @click="toggle('door')"
+    >
+      Door
+    </BaseButton>
+
+    <BaseButton
+      :variant="activeTool === 'window' ? 'primary' : 'ghost'"
+      icon="window"
+      class="w-full justify-start"
+      :aria-pressed="activeTool === 'window'"
+      @click="toggle('window')"
+    >
+      Window
     </BaseButton>
 
     <div class="mt-auto flex gap-1 border-t border-border pt-2">

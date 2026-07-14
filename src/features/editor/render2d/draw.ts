@@ -1,9 +1,10 @@
 import { pointInPolygon, polygonCentroid } from '../domain/geometry'
+import { fittingOpenings, openingRect, type FittedOpening } from '../domain/openings'
 import { nodeAt } from '../domain/operations'
 import type { Guide } from '../domain/snapping'
 import { detectRooms, roomKey, type Room } from '../domain/rooms'
 import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
-import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
+import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { Selection, ToolOverlay } from '../tools/types'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
 import { computeWallGeometry, type WallFaces, type WallGeometry } from '../domain/wallJoints'
@@ -69,9 +70,20 @@ export function render(
   // one miter pass per repaint, shared by the wall fills and the face labels
   // (selection and ghost never coexist, so the ghost never skews label faces)
   const geometry = computeWallGeometry(ghost?.doc ?? viewDoc)
+  // resolved once against that same miter pass, so the cut-out gaps and everything
+  // downstream agree on which openings currently fit
+  const openings = fittingOpenings(ghost?.doc ?? viewDoc, geometry)
   withWorldTransform(ctx, vp, dpr, () => {
     drawRooms(ctx, rooms, palette, selectedRoomKey)
-    drawWalls(ctx, ghost?.doc ?? viewDoc, geometry, palette, selectedWallId, ghost?.ghostIds ?? null)
+    drawWalls(
+      ctx,
+      ghost?.doc ?? viewDoc,
+      geometry,
+      openings,
+      palette,
+      selectedWallId,
+      ghost?.ghostIds ?? null,
+    )
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc)
     drawRoomLabels(ctx, vp, rooms, palette)
@@ -490,6 +502,7 @@ function drawWalls(
   ctx: CanvasRenderingContext2D,
   doc: SceneDocument,
   geometry: WallGeometry,
+  openings: Map<string, FittedOpening[]>,
   palette: CanvasPalette,
   selectedWallId: string | null,
   ghostIds: Set<string> | null,
@@ -498,31 +511,43 @@ function drawWalls(
   const isGhost = (id: string): boolean => ghostIds?.has(id) ?? false
   const isFront = (id: string): boolean => id === selectedWallId || isGhost(id)
 
-  const front: string[] = []
+  const holesOf = (wall: Wall): Vec2[][] =>
+    (openings.get(wall.id) ?? []).map((fitted) => openingRect(fitted.span, wall.thickness))
+
+  const front: Wall[] = []
   ctx.globalAlpha = 1
   ctx.fillStyle = palette.wall
   for (const wall of doc.walls) {
     const poly = polygons.get(wall.id)
     if (!poly) continue
     if (isFront(wall.id)) {
-      front.push(wall.id)
+      front.push(wall)
       continue
     }
-    fillPoly(ctx, poly)
+    fillWallShape(ctx, poly, holesOf(wall))
   }
-  for (const id of front) {
-    ctx.globalAlpha = isGhost(id) ? 0.5 : 1
+  for (const wall of front) {
+    ctx.globalAlpha = isGhost(wall.id) ? 0.5 : 1
     ctx.fillStyle = palette.accent
-    fillPoly(ctx, polygons.get(id)!)
+    fillWallShape(ctx, polygons.get(wall.id)!, holesOf(wall))
   }
   ctx.globalAlpha = 1
 }
 
-function fillPoly(ctx: CanvasRenderingContext2D, pts: Vec2[]): void {
-  if (pts.length === 0) return
+/**
+ * Fills a wall: its mitred ring with its openings carved out — the same evenodd
+ * trace the room floors use for their holes.
+ *
+ * The gap is a real hole, not a patch of background: rooms are drawn before the
+ * walls, so painting over it would scrub out the floor showing through the
+ * doorway (which is exactly what you want to see through it).
+ */
+function fillWallShape(ctx: CanvasRenderingContext2D, ring: Vec2[], holes: Vec2[][]): void {
+  if (ring.length === 0) return
   ctx.beginPath()
-  tracePoly(ctx, pts)
-  ctx.fill()
+  tracePoly(ctx, ring)
+  for (const hole of holes) tracePoly(ctx, hole)
+  ctx.fill('evenodd')
 }
 
 /** Appends one closed ring to the current path (no fill). */

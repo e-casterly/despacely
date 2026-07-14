@@ -2,8 +2,9 @@ import type { Command } from '../domain/commands'
 import type { Guide } from '../domain/snapping'
 import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 
-/** The editor's active interaction mode. 'select' is the neutral mode. */
-export type ToolId = 'select' | 'wall' | 'room'
+/** The editor's active interaction mode. 'select' is the neutral mode.
+ * 'door' and 'window' are the two OpeningKinds, so one tool factory serves both. */
+export type ToolId = 'select' | 'wall' | 'room' | 'door' | 'window'
 
 /** A pointer event delivered to a tool in world coordinates (cm). */
 export interface PointerInput {

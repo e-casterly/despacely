@@ -8,6 +8,7 @@ import type { Vec2 } from '../domain/types'
 import type { PointerInput, Tool, ToolContext, ToolId } from '../tools/types'
 import { createWallTool } from '../tools/wallTool'
 import { createRoomTool } from '../tools/roomTool'
+import { createOpeningTool } from '../tools/openingTool'
 import { createSelectTool } from '../tools/selectTool'
 
 const { activeTool } = defineProps<{ activeTool: ToolId }>()
@@ -27,6 +28,8 @@ const tools: Partial<Record<ToolId, Tool>> = {
   select: createSelectTool(),
   wall: createWallTool(),
   room: createRoomTool(),
+  door: createOpeningTool('door'),
+  window: createOpeningTool('window'),
 }
 function currentTool(): Tool | undefined {
   return tools[activeTool]
@@ -281,9 +284,9 @@ onBeforeUnmount(() => {
           ? 'cursor-grabbing'
           : spaceHeld
             ? 'cursor-grab'
-            : activeTool === 'wall' || activeTool === 'room'
-              ? 'cursor-crosshair'
-              : ''
+            : activeTool === 'select'
+              ? ''
+              : 'cursor-crosshair'
       "
       @wheel.prevent="onWheel"
       @pointerdown="onPointerDown"
