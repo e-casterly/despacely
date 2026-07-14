@@ -80,7 +80,7 @@ export function render(
     if (view.overlay?.mergeTarget) drawMergeRing(ctx, vp, viewDoc, palette, view.overlay.mergeTarget)
   })
 
-  // guides last, in screen space (like the grid) so they stay 1px-crisp on top
+  // guides to last, in screen space (like the grid) so they stay 1px-crisp on top
   if (view.overlay?.guides?.length) drawGuides(ctx, vp, view.overlay.guides, palette)
 }
 

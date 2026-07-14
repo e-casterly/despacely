@@ -1,20 +1,26 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import Canvas2D from '@/features/editor/render2d/Canvas2D.vue'
 import EditorInspector from '@/features/editor/ui/EditorInspector.vue'
 import EditorSidebar from '@/features/editor/ui/EditorSidebar.vue'
+import EditorViewToggle, { type ViewMode } from '@/features/editor/ui/EditorViewToggle.vue'
 import EditorZoomControls from '@/features/editor/ui/EditorZoomControls.vue'
 import { useEditorStore } from '@/features/editor/store/editorStore'
 import type { ToolId } from '@/features/editor/tools/types'
 import { useProjectStore } from '@/features/projects/projectStore'
+
+// three.js is heavy; loading Canvas3D lazily keeps it out of the initial bundle
+// (the chunk is fetched the first time the user switches to the 3D view)
+const Canvas3D = defineAsyncComponent(() => import('@/features/editor/render3d/Canvas3D.vue'))
 
 const route = useRoute()
 const editor = useEditorStore()
 const projects = useProjectStore()
 
 const activeTool = ref<ToolId>('select')
+const viewMode = ref<ViewMode>('2d')
 const canvas = useTemplateRef<InstanceType<typeof Canvas2D>>('canvas')
 
 const projectId = computed(() => route.params.id as string)
@@ -57,6 +63,15 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeyDown)
   if (projects.projects.length === 0) await projects.load()
   await editor.open(projectId.value)
+})
+
+// the 3D view is read-only: drop any active tool/selection so a stray
+// Delete or draw-tool state doesn't linger while it's shown
+watch(viewMode, (mode) => {
+  if (mode === '3d') {
+    activeTool.value = 'select'
+    editor.select(null)
+  }
 })
 
 // vue-router reuses this component when navigating editor -> editor
@@ -106,15 +121,21 @@ onBeforeUnmount(() => {
         @undo="editor.undo"
         @redo="editor.redo"
       />
-      <Canvas2D v-if="editor.doc" ref="canvas" :active-tool="activeTool" />
-      <EditorInspector />
-      <EditorZoomControls
-        v-if="editor.doc"
-        :zoom="canvas?.zoomLevel ?? 1"
-        @zoom-in="canvas?.zoomIn()"
-        @zoom-out="canvas?.zoomOut()"
-        @fit="canvas?.zoomToFit()"
-      />
+      <Canvas2D v-if="editor.doc && viewMode === '2d'" ref="canvas" :active-tool="activeTool" />
+      <Canvas3D v-else-if="editor.doc && viewMode === '3d'" />
+
+      <EditorViewToggle :mode="viewMode" @change="viewMode = $event" />
+
+      <template v-if="viewMode === '2d'">
+        <EditorInspector />
+        <EditorZoomControls
+          v-if="editor.doc"
+          :zoom="canvas?.zoomLevel ?? 1"
+          @zoom-in="canvas?.zoomIn()"
+          @zoom-out="canvas?.zoomOut()"
+          @fit="canvas?.zoomToFit()"
+        />
+      </template>
     </div>
   </div>
 </template>
