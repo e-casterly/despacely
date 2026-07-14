@@ -11,20 +11,9 @@ import { detectRooms, roomKey, type Room } from '../domain/rooms'
 import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
 import type { Selection, ToolOverlay } from '../tools/types'
+import type { EditorPalette } from '../palette'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
 import { computeWallGeometry, type WallFaces, type WallGeometry } from '../domain/wallJoints'
-
-export interface CanvasPalette {
-  background: string
-  gridFine: string
-  gridMid: string
-  gridStrong: string
-  room: string
-  roomLabel: string
-  wall: string
-  opening: string
-  accent: string
-}
 
 /** Metric grid tiers (cm): 10cm fine, 50cm (4 squares per metre), 1m strong. */
 const GRID_TIERS = [
@@ -47,7 +36,7 @@ export function render(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
   doc: SceneDocument,
-  palette: CanvasPalette,
+  palette: EditorPalette,
   dpr: number,
   view: RenderView = {},
 ): void {
@@ -98,7 +87,7 @@ export function render(
     )
     drawOpenings(ctx, vp, ghost?.doc ?? viewDoc, openings, rooms, palette, selectedOpeningId)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
-    drawItems(ctx, vp, viewDoc)
+    drawItems(ctx, vp, viewDoc, palette)
     drawRoomLabels(ctx, vp, rooms, palette)
     if (view.overlay?.roomDraft) drawRoomDraft(ctx, vp, view.overlay.roomDraft, palette)
     drawWallLengths(ctx, vp, lengthLabelSegments(viewDoc, rooms, geometry.faces, view), palette)
@@ -122,7 +111,7 @@ function drawGuides(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
   guides: Guide[],
-  palette: CanvasPalette,
+  palette: EditorPalette,
 ): void {
   ctx.save()
   ctx.strokeStyle = palette.accent
@@ -246,7 +235,7 @@ function augmentWithGhost(
  * painted fine -> strong, so coarser (darker) lines overpaint the finer ones
  * at shared positions.
  */
-function drawGrid(ctx: CanvasRenderingContext2D, vp: Viewport, palette: CanvasPalette): void {
+function drawGrid(ctx: CanvasRenderingContext2D, vp: Viewport, palette: EditorPalette): void {
   const topLeft = screenToWorld(vp, { x: 0, y: 0 })
   const bottomRight = screenToWorld(vp, { x: vp.width, y: vp.height })
 
@@ -304,7 +293,7 @@ const SELECTED_ROOM_ALPHA = 0.25
 function drawRooms(
   ctx: CanvasRenderingContext2D,
   rooms: Room[],
-  palette: CanvasPalette,
+  palette: EditorPalette,
   selectedKey: string | null,
 ): void {
   for (const room of rooms) {
@@ -344,7 +333,7 @@ function drawRoomLabels(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
   rooms: Room[],
-  palette: CanvasPalette,
+  palette: EditorPalette,
 ): void {
   const fontSize = ROOM_LABEL_FONT_PX / vp.zoom // world cm that render as 12px
   const pad = ROOM_LABEL_PADDING_PX / vp.zoom
@@ -447,7 +436,7 @@ function drawWallLengths(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
   segments: LengthSegment[],
-  palette: CanvasPalette,
+  palette: EditorPalette,
 ): void {
   if (segments.length === 0) return
   const fontSize = WALL_LENGTH_FONT_PX / vp.zoom
@@ -502,7 +491,7 @@ function drawRoomDraft(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
   corners: Vec2[],
-  palette: CanvasPalette,
+  palette: EditorPalette,
 ): void {
   if (corners.length < 4) return
   ctx.strokeStyle = palette.accent
@@ -534,7 +523,7 @@ function drawWalls(
   doc: SceneDocument,
   geometry: WallGeometry,
   openings: Map<string, FittedOpening[]>,
-  palette: CanvasPalette,
+  palette: EditorPalette,
   selectedWallId: string | null,
   ghostIds: Set<string> | null,
 ): void {
@@ -690,7 +679,7 @@ function drawOpenings(
   doc: SceneDocument,
   openings: Map<string, FittedOpening[]>,
   rooms: Room[],
-  palette: CanvasPalette,
+  palette: EditorPalette,
   selectedOpeningId: string | null,
 ): void {
   if (openings.size === 0) return
@@ -753,7 +742,7 @@ function drawWallNodes(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
   doc: SceneDocument,
-  palette: CanvasPalette,
+  palette: EditorPalette,
   selectedWallId: string | null,
   selectedNodeId: NodeId | null,
 ): void {
@@ -792,7 +781,7 @@ function drawMergeRing(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
   doc: SceneDocument,
-  palette: CanvasPalette,
+  palette: EditorPalette,
   nodeId: NodeId,
 ): void {
   const node = doc.nodes[nodeId]
@@ -804,7 +793,13 @@ function drawMergeRing(
   ctx.stroke()
 }
 
-function drawItems(ctx: CanvasRenderingContext2D, vp: Viewport, doc: SceneDocument): void {
+/** Each item is drawn in its own stored colour — the palette only supplies the outline. */
+function drawItems(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  doc: SceneDocument,
+  palette: EditorPalette,
+): void {
   for (const item of doc.items) {
     ctx.save()
     ctx.translate(item.pos.x, item.pos.y)
@@ -812,7 +807,7 @@ function drawItems(ctx: CanvasRenderingContext2D, vp: Viewport, doc: SceneDocume
     ctx.fillStyle = item.color
     ctx.fillRect(-item.size.x / 2, -item.size.y / 2, item.size.x, item.size.y)
     ctx.lineWidth = 1 / vp.zoom
-    ctx.strokeStyle = 'rgb(0 0 0 / 0.2)'
+    ctx.strokeStyle = palette.itemStroke
     ctx.strokeRect(-item.size.x / 2, -item.size.y / 2, item.size.x, item.size.y)
     ctx.restore()
   }

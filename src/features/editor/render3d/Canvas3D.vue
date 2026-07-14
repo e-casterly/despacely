@@ -15,6 +15,7 @@ import {
 import { fittingOpenings, sliceWallFootprint, wallBlocks } from '../domain/openings'
 import { docBounds, wallSegment } from '../domain/operations'
 import { detectRooms } from '../domain/rooms'
+import { readPalette, type EditorPalette } from '../palette'
 import type { SceneDocument, Vec2 } from '../domain/types'
 
 const editor = useEditorStore()
@@ -31,11 +32,9 @@ let content: THREE.Group | null = null
 let resizeObserver: ResizeObserver | undefined
 let frameId: number | undefined
 
-/** Reads a CSS custom property off :root, falling back when unset. */
-function cssColor(name: string, fallback: string): THREE.Color {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return new THREE.Color(value || fallback)
-}
+// the same theme the 2D plan paints with, resolved on mount (see palette.ts);
+// three parses the CSS colour strings it holds
+let palette!: EditorPalette
 
 /** Renders one frame on the next tick; repeated calls coalesce into one. */
 function requestRender() {
@@ -46,10 +45,6 @@ function requestRender() {
   })
 }
 
-/** Light neutral so lighting shows the wall faces apart (not tied to a token). */
-const WALL_COLOR = 0xdfe3ea
-/** Light indigo, echoing the 2D room fill (--color-room) so both views read alike. */
-const FLOOR_COLOR = 0xe4e6f6
 /** Lifts the floors a hair off y=0 so they don't z-fight the ground grid. */
 const FLOOR_LIFT = 0.2
 
@@ -69,7 +64,7 @@ function buildContent(doc: SceneDocument): THREE.Group {
   // Walls: each one's 2D footprint extruded to its own height. The footprint is
   // the same mitred geometry the 2D canvas draws, so corners join identically.
   const wallMaterial = new THREE.MeshLambertMaterial({
-    color: WALL_COLOR,
+    color: palette.wall3d,
     side: THREE.DoubleSide,
   })
   /** One extruded block of wall: a footprint ring, rising `height` from `baseY`. */
@@ -109,7 +104,7 @@ function buildContent(doc: SceneDocument): THREE.Group {
   // detached loop is not floor, so it becomes a hole in the slab — the same
   // carve-out the 2D canvas fills with the evenodd rule.
   const floorMaterial = new THREE.MeshLambertMaterial({
-    color: FLOOR_COLOR,
+    color: palette.floor3d,
     side: THREE.DoubleSide,
   })
   for (const room of detectRooms(doc)) {
@@ -272,8 +267,10 @@ onMounted(() => {
   if (!container.value) return
   const { width, height } = container.value.getBoundingClientRect()
 
+  palette = readPalette()
+
   scene = new THREE.Scene()
-  scene.background = cssColor('--color-bg-subtle', '#f8fafc')
+  scene.background = new THREE.Color(palette.background3d)
 
   camera = new THREE.PerspectiveCamera(50, width / height || 1, 1, 100_000)
 
@@ -288,7 +285,12 @@ onMounted(() => {
   scene.add(key)
 
   // ground grid, sized generously around the origin (cm units)
-  const grid = new THREE.GridHelper(4000, 40, cssColor('--color-grid-strong', '#cbd5e1'), cssColor('--color-grid-mid', '#e2e8f0'))
+  const grid = new THREE.GridHelper(
+    4000,
+    40,
+    new THREE.Color(palette.gridStrong),
+    new THREE.Color(palette.gridMid),
+  )
   scene.add(grid)
 
   controls = new OrbitControls(camera, renderer.domElement)

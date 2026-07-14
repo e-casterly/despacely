@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useEditorStore } from '../store/editorStore'
-import { render, type CanvasPalette } from './draw'
+import { render } from './draw'
+import { readPalette, type EditorPalette } from '../palette'
 import { createViewport, panBy, screenToWorld, zoomAt, zoomToFit } from './viewport'
 import { docBounds } from '../domain/operations'
 import type { Vec2 } from '../domain/types'
@@ -56,17 +57,8 @@ function pointerInput(event: PointerEvent): PointerInput {
   return { world: screenToWorld(viewport, pointerPosition(event)), shift: event.shiftKey }
 }
 
-let palette: CanvasPalette = {
-  background: '#ffffff',
-  gridFine: '#f1f5f9',
-  gridMid: '#e2e8f0',
-  gridStrong: '#cbd5e1',
-  room: 'rgb(99 102 241 / 0.1)',
-  roomLabel: '#64748b',
-  wall: '#1e293b',
-  opening: '#64748b',
-  accent: '#6366f1',
-}
+// resolved on mount, once the theme's stylesheet is in the document
+let palette!: EditorPalette
 let dpr = 1
 let frameId: number | undefined
 let resizeObserver: ResizeObserver | undefined
@@ -85,22 +77,6 @@ function requestRepaint() {
       selection: editor.selection,
     })
   })
-}
-
-function readPalette(): CanvasPalette {
-  const styles = getComputedStyle(document.documentElement)
-  const token = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback
-  return {
-    background: token('--color-bg', palette.background),
-    gridFine: token('--color-grid-fine', palette.gridFine),
-    gridMid: token('--color-grid-mid', palette.gridMid),
-    gridStrong: token('--color-grid-strong', palette.gridStrong),
-    room: token('--color-room', palette.room),
-    roomLabel: token('--color-text-muted', palette.roomLabel),
-    wall: token('--color-text', palette.wall),
-    opening: token('--color-opening', palette.opening),
-    accent: token('--color-primary', palette.accent),
-  }
 }
 
 function resize() {

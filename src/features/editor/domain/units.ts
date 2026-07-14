@@ -10,7 +10,8 @@ export const WINDOW_SILL = 90
 
 export const ITEM_SIZE = 60
 export const ITEM_HEIGHT = 75
-export const ITEM_COLOR = '#94a3b8'
+// an item's colour is document data, and its default is a theme decision: the tool
+// that builds the Item reads --color-item off the palette (see palette.ts)
 
 /** Room areas read in m² while documents store cm²; rounded to 2 decimals. */
 export function squareCmToM2(areaCm2: number): number {

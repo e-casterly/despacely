@@ -16,15 +16,38 @@
   --color-text-muted: #64748b;
   --color-overlay: rgb(0 0 0 / 0.4);
 
-  /* editor grid: 10cm / 50cm / 1m tiers */
+  /* --- editor canvas ---
+     The plan is a drawing, not a document: it owns its own colours, so that
+     restyling the app's chrome never silently repaints the walls. Nothing on the
+     canvas may borrow a neutral or the brand colour from above. */
+
+  /* grid: 10cm / 50cm / 1m tiers */
   --color-grid-fine: #f1f5f9;
   --color-grid-mid: #e2e8f0;
   --color-grid-strong: #cbd5e1;
   /* room fill: translucent so the grid shows through and nested rooms stack darker */
   --color-room: rgb(99 102 241 / 0.1);
-  /* door/window symbols: a mid slate, so they read as a secondary line inside the
-     gap rather than competing with the wall they are cut into */
+  /* walls in plan: a grey mass, the way a plan poches them. The drawing's weight
+     goes to the thin dark marks on top — openings, dimensions, labels — rather
+     than to the wall bodies themselves. */
+  --color-wall: #94a3b8;
+  /* door/window symbols: a thin, darker line inside the gap. Darker than the wall
+     it is cut into on purpose — a hairline reads as detail, not as mass. */
   --color-opening: #64748b;
+  /* canvas text (room areas): near-black, so the numbers you actually read carry
+     more weight than anything drawn under them */
+  --color-label: #0f172a;
+  /* selection, ghosts, snap guides and live measurements. Starts out as the brand
+     indigo, but it is the canvas's to change: it means "active", not "Despacely". */
+  --color-accent: #6366f1;
+  /* in 3d a wall is a surface, not a line: a light neutral, so the lighting alone
+     tells its faces apart. The floor keeps the indigo tint of --color-room, so the
+     plan and the model read alike. */
+  --color-wall-3d: #dfe3ea;
+  --color-floor-3d: #e4e6f6;
+  /* furniture: the fill a newly placed item takes, and the hairline outlining it */
+  --color-item: #94a3b8;
+  --color-item-stroke: rgb(0 0 0 / 0.2);
 
   /* feedback */
   --color-danger: #ef4444;
