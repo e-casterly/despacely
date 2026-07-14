@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Command } from '../../domain/commands'
+import { SetOpeningPropsCommand, type Command } from '../../domain/commands'
 import { addNode, addWall, createEmptyDocument } from '../../domain/operations'
-import type { SceneDocument } from '../../domain/types'
+import type { Opening, SceneDocument, Vec2 } from '../../domain/types'
 import type { Selection, ToolContext } from '../types'
 import { createSelectTool } from '../selectTool'
 
@@ -417,15 +417,128 @@ describe('selectTool openings', () => {
     expect(select).toHaveBeenCalledWith({ kind: 'wall', id: wall.id })
   })
 
-  it('starts no drag on an opening, so the wall underneath cannot be moved by it', () => {
-    const { doc } = docWithOpening()
+  it('never drags the wall underneath: the opening slides instead', () => {
+    const { doc, wall } = docWithOpening()
     const { ctx, apply } = ctxFor(doc)
     const tool = createSelectTool()
 
+    // pull well off the wall's axis — the opening still only moves along it
     tool.onPointerDown!(at(100, 0), ctx)
-    tool.onPointerMove!(at(160, 60), ctx)
-    tool.onPointerUp!(at(160, 60), ctx)
+    tool.onPointerMove!(at(140, 60), ctx)
+    tool.onPointerUp!(at(140, 60), ctx)
+
+    expect(apply).toHaveBeenCalledOnce()
+    expect(apply.mock.calls[0]![0]).toBeInstanceOf(SetOpeningPropsCommand)
+    // the wall's own endpoints never budged
+    expect(doc.nodes[wall.a]!.pos).toEqual({ x: 0, y: 0 })
+    expect(doc.nodes[wall.b]!.pos).toEqual({ x: 200, y: 0 })
+  })
+})
+
+describe('selectTool opening drag', () => {
+  /** A 20cm-thick, 200cm wall with a 40cm door centred at 100. */
+  function docWithOpening(...extra: Opening[]) {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b, { thickness: 20 })
+    wall.openings = [
+      { id: 'o1', kind: 'door', offset: 100, width: 40, height: 210, sill: 0 }, // [80, 120]
+      ...extra,
+    ]
+    return { doc, wall }
+  }
+
+  /**
+   * Grabs the opening at `from`, drags to `to`, releases — then runs whatever it
+   * committed, since the tool only ever hands a command to the store.
+   *
+   * The pointer is walked across in steps, the way a real one arrives. That is not
+   * decoration: an opening blocked by its neighbour holds at the last offset it
+   * could reach, which only exists if it was ever reported.
+   */
+  function dragFrom(doc: SceneDocument, from: Vec2, to: Vec2, steps = 20) {
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+    tool.onPointerDown!({ world: from, shift: false }, ctx)
+    for (let i = 1; i <= steps; i++) {
+      const world = {
+        x: from.x + ((to.x - from.x) * i) / steps,
+        y: from.y + ((to.y - from.y) * i) / steps,
+      }
+      tool.onPointerMove!({ world, shift: false }, ctx)
+    }
+    tool.onPointerUp!({ world: to, shift: false }, ctx)
+    apply.mock.calls[0]?.[0]?.do(doc)
+    return { apply }
+  }
+
+  const offsetOf = (doc: SceneDocument, id: string) =>
+    doc.walls.flatMap((w) => w.openings).find((o) => o.id === id)!.offset
+
+  it('slides the opening along its wall and commits one command', () => {
+    const { doc } = docWithOpening()
+
+    const { apply } = dragFrom(doc, { x: 100, y: 0 }, { x: 150, y: 0 })
+
+    expect(apply).toHaveBeenCalledOnce()
+    expect(offsetOf(doc, 'o1')).toBe(150)
+  })
+
+  it('keeps the grip, so grabbing off-centre does not snap the opening to the cursor', () => {
+    const { doc } = docWithOpening()
+
+    // grabbed 10cm right of the door's middle, then moved 30cm further along
+    dragFrom(doc, { x: 110, y: 0 }, { x: 140, y: 0 })
+
+    expect(offsetOf(doc, 'o1')).toBe(130) // 100 + 30, not 140
+  })
+
+  it('clamps to the offsets the wall can take, instead of sliding off the end', () => {
+    const { doc } = docWithOpening()
+
+    dragFrom(doc, { x: 100, y: 0 }, { x: 5000, y: 0 })
+
+    // the wall is [0, 200] clear and the door is 40 wide, so 180 is as far as it goes
+    expect(offsetOf(doc, 'o1')).toBe(180)
+  })
+
+  it('holds at the last good offset rather than sliding through a neighbour', () => {
+    // a second opening occupying [150, 190]
+    const { doc } = docWithOpening({
+      id: 'o2',
+      kind: 'window',
+      offset: 170,
+      width: 40,
+      height: 120,
+      sill: 90,
+    })
+
+    dragFrom(doc, { x: 100, y: 0 }, { x: 200, y: 0 })
+
+    // it can reach 130 (door spans [110, 150], touching o2's jamb) but no further
+    expect(offsetOf(doc, 'o1')).toBe(130)
+    expect(offsetOf(doc, 'o2')).toBe(170) // the neighbour never moved
+  })
+
+  it('commits nothing when the pointer never leaves the dead zone', () => {
+    const { doc } = docWithOpening()
+
+    const { apply } = dragFrom(doc, { x: 100, y: 0 }, { x: 102, y: 0 }) // under snapDist 5
 
     expect(apply).not.toHaveBeenCalled()
+    expect(offsetOf(doc, 'o1')).toBe(100)
+  })
+
+  it('previews the slide without touching the document until release', () => {
+    const { doc } = docWithOpening()
+    const { ctx } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 0), ctx)
+    tool.onPointerMove!(at(150, 0), ctx)
+
+    expect(tool.preview).toEqual({ movedOpening: { id: 'o1', offset: 150 } })
+    expect(offsetOf(doc, 'o1')).toBe(100) // still where it was
   })
 })

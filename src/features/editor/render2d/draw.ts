@@ -64,7 +64,12 @@ export function render(
   // The doc as the user currently sees it: a drag preview overrides node
   // positions on a render-only copy, so the real document stays untouched
   // until the move is committed as a command.
-  const viewDoc = view.overlay?.movedNodes ? withMovedNodes(doc, view.overlay.movedNodes) : doc
+  let viewDoc = view.overlay?.movedNodes ? withMovedNodes(doc, view.overlay.movedNodes) : doc
+  // an opening being dragged rides on the same render-only copy, so the gap, the
+  // symbol and the selection wash all follow it without touching the document
+  if (view.overlay?.movedOpening) {
+    viewDoc = withMovedOpening(viewDoc, view.overlay.movedOpening)
+  }
   // The ghost (a single wall, or the four edges of a room being drawn) is drawn
   // through the same path as real walls so they all miter against each other;
   // node dots stay on the real doc so the ghost corners carry none.
@@ -160,6 +165,24 @@ function withMovedNodes(doc: SceneDocument, moved: Record<NodeId, Vec2>): SceneD
     if (node) nodes[id] = { ...node, pos }
   }
   return { ...doc, nodes }
+}
+
+/** Render-only copy of the doc with one opening slid along its wall. */
+function withMovedOpening(
+  doc: SceneDocument,
+  moved: { id: string; offset: number },
+): SceneDocument {
+  const walls = doc.walls.map((wall) =>
+    wall.openings.some((opening) => opening.id === moved.id)
+      ? {
+          ...wall,
+          openings: wall.openings.map((opening) =>
+            opening.id === moved.id ? { ...opening, offset: moved.offset } : opening,
+          ),
+        }
+      : wall,
+  )
+  return { ...doc, walls }
 }
 
 /** The ghost — a wall or a room's corner loop — as a flat list of segments. */

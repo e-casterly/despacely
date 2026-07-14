@@ -38,6 +38,8 @@ export interface ToolOverlay {
   roomDraft?: Vec2[]
   /** Drag preview: render these nodes (and walls on them) at overridden positions. */
   movedNodes?: Record<NodeId, Vec2>
+  /** Drag preview: render this opening slid to a different offset along its wall. */
+  movedOpening?: { id: string; offset: number }
   /** Ring on the vertex the dragged vertex will weld into when dropped. */
   mergeTarget?: NodeId
   /** Snap guides the current point is aligned to, drawn as construction lines. */

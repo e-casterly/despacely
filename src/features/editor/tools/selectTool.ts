@@ -1,9 +1,23 @@
-import { MergeNodesCommand, MoveNodeCommand, MoveNodesCommand } from '../domain/commands'
-import { openingAtPoint } from '../domain/openings'
-import { collapsesAWall, nodeAt, nodesConnected, wallUnderPoint } from '../domain/operations'
+import {
+  MergeNodesCommand,
+  MoveNodeCommand,
+  MoveNodesCommand,
+  SetOpeningPropsCommand,
+} from '../domain/commands'
+import { projectOnSegment } from '../domain/geometry'
+import { offsetRange, openingAtPoint, overlapsAnotherOpening } from '../domain/openings'
+import {
+  collapsesAWall,
+  findWall,
+  nodeAt,
+  nodesConnected,
+  wallSegment,
+  wallUnderPoint,
+} from '../domain/operations'
 import { roomAt, roomKey } from '../domain/rooms'
 import { resolveSnap, type Guide } from '../domain/snapping'
 import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
+import { computeWallGeometry } from '../domain/wallJoints'
 import type { PointerInput, Tool, ToolContext, ToolOverlay } from './types'
 
 function samePoint(a: Vec2, b: Vec2): boolean {
@@ -19,9 +33,33 @@ type Drag =
   | { kind: 'node'; nodeId: NodeId; grab: Vec2; from: Vec2; to: Vec2; mergeInto: NodeId | null; guides: Guide[] }
   // a wall body and a room contour drag the same way: one delta over a node set
   | { kind: 'wall' | 'room'; grab: Vec2; ends: DragEnd[]; delta: Vec2; guides: Guide[] }
+  // an opening only ever slides along its own wall, so the whole drag is one
+  // number: its offset from node A. The wall itself holds still throughout, so
+  // its centerline and the offsets it will accept are settled once, at the grab.
+  | {
+      kind: 'opening'
+      openingId: string
+      wallId: string
+      grab: Vec2
+      a: Vec2
+      b: Vec2
+      /** where along the wall the pointer grabbed it — so it doesn't jump to centre */
+      grabOffset: number
+      range: { min: number; max: number }
+      from: number
+      to: number
+    }
+
+/** How far along the wall's centerline (cm from node A) a point sits. */
+function offsetAlong(point: Vec2, a: Vec2, b: Vec2): number {
+  return projectOnSegment(point, a, b).t * Math.hypot(b.x - a.x, b.y - a.y)
+}
+
+/** A drag that moves vertices around — everything except sliding an opening. */
+type NodeDrag = Exclude<Drag, { kind: 'opening' }>
 
 /** The dragged nodes at their preview positions (empty when nothing moved yet). */
-function draggedNodes(drag: Drag): Record<NodeId, Vec2> {
+function draggedNodes(drag: NodeDrag): Record<NodeId, Vec2> {
   if (drag.kind === 'node') {
     return samePoint(drag.from, drag.to) ? {} : { [drag.nodeId]: drag.to }
   }
@@ -84,6 +122,9 @@ export function createSelectTool(): Tool {
 
     get preview(): ToolOverlay | null {
       if (!drag) return null
+      if (drag.kind === 'opening') {
+        return drag.to === drag.from ? null : { movedOpening: { id: drag.openingId, offset: drag.to } }
+      }
       const overlay: ToolOverlay = {}
       const moved = draggedNodes(drag)
       const moving = Object.keys(moved).length > 0
@@ -111,10 +152,26 @@ export function createSelectTool(): Tool {
       }
       // An opening lives inside a wall's body, so it has to be offered the point
       // before the wall is — otherwise the wall pick would always swallow it.
-      // It has no drag of its own yet, so selecting it is all that happens.
-      const opening = openingAtPoint(ctx.doc, input.world)
-      if (opening) {
-        ctx.select({ kind: 'opening', id: opening.opening.id })
+      const hit = openingAtPoint(ctx.doc, input.world)
+      if (hit) {
+        ctx.select({ kind: 'opening', id: hit.opening.id })
+        const faces = computeWallGeometry(ctx.doc).faces.get(hit.wall.id)
+        const { a, b } = wallSegment(ctx.doc, hit.wall)
+        const range = faces ? offsetRange(faces, a, b, hit.opening.width) : null
+        // no room to slide it (the wall barely holds it): selecting is all we do
+        if (!range) return
+        drag = {
+          kind: 'opening',
+          openingId: hit.opening.id,
+          wallId: hit.wall.id,
+          grab: input.world,
+          a,
+          b,
+          grabOffset: offsetAlong(input.world, a, b),
+          range,
+          from: hit.opening.offset,
+          to: hit.opening.offset,
+        }
         return
       }
       const wall = wallUnderPoint(ctx.doc, input.world, ctx.snapDist)
@@ -153,10 +210,31 @@ export function createSelectTool(): Tool {
         if (drag.kind === 'node') {
           drag.to = drag.from
           drag.mergeInto = null
+          drag.guides = []
+        } else if (drag.kind === 'opening') {
+          drag.to = drag.from
         } else {
           drag.delta = { x: 0, y: 0 }
+          drag.guides = []
         }
-        drag.guides = []
+        return
+      }
+      if (drag.kind === 'opening') {
+        const sliding = drag
+        // slide along the wall by however far the pointer travelled along it,
+        // keeping the grip: the opening does not jump its centre to the cursor
+        const travelled = offsetAlong(input.world, sliding.a, sliding.b) - sliding.grabOffset
+        const next = Math.min(
+          Math.max(sliding.from + travelled, sliding.range.min),
+          sliding.range.max,
+        )
+        const wall = findWall(ctx.doc, sliding.wallId)
+        if (!wall) return
+        const moved = wall.openings.find((opening) => opening.id === sliding.openingId)
+        if (!moved) return
+        // a neighbouring opening blocks the way: hold at the last good offset
+        // rather than sliding through it (the collapsesAWall refusal idiom)
+        if (!overlapsAnotherOpening(wall, { ...moved, offset: next })) drag.to = next
         return
       }
       if (drag.kind === 'node') {
@@ -205,6 +283,13 @@ export function createSelectTool(): Tool {
 
     onPointerUp(_input: PointerInput, ctx: ToolContext) {
       if (!drag) return
+      if (drag.kind === 'opening') {
+        if (drag.to !== drag.from) {
+          ctx.apply(new SetOpeningPropsCommand(drag.openingId, { offset: drag.to }))
+        }
+        drag = null
+        return
+      }
       if (drag.kind === 'node') {
         if (drag.mergeInto) {
           ctx.apply(new MergeNodesCommand(drag.nodeId, drag.mergeInto))
