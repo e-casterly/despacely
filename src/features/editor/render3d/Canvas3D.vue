@@ -5,6 +5,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { useEditorStore } from '../store/editorStore'
 import { computeWallGeometry } from '../domain/wallJoints'
 import { recallCamera, rememberCamera } from './cameraMemory'
+import {
+  groundForward,
+  MIN_ORBIT_DISTANCE_CM,
+  panDirection,
+  panDistance,
+  PAN_KEYS,
+} from './cameraPan'
 import { fittingOpenings, sliceWallFootprint, wallBlocks } from '../domain/openings'
 import { docBounds, wallSegment } from '../domain/operations'
 import { detectRooms } from '../domain/rooms'
@@ -72,7 +79,7 @@ function buildContent(doc: SceneDocument): THREE.Group {
       depth: height,
       bevelEnabled: false,
     })
-    // the rotate turns the extrusion into the Y axis, so the lift is a plain translate
+    // the rotation turns the extrusion into the Y axis, so the lift is a plain translate
     geometry.rotateX(-Math.PI / 2)
     geometry.translate(0, baseY, 0)
     group.add(new THREE.Mesh(geometry, wallMaterial))
@@ -190,6 +197,67 @@ function saveCamera() {
   })
 }
 
+// --- WASD: slide the camera across the floor ---
+//
+// Not OrbitControls' own key handling: that fires on keydown, so holding a key
+// leans on the OS auto-repeat — a pause, then jerky hops. Tracking the held keys
+// and moving per frame instead makes it glide.
+
+const heldPanKeys = new Set<string>()
+let panFrame: number | undefined
+let lastPanTime = 0
+
+function onPanKeyDown(event: KeyboardEvent) {
+  if (!PAN_KEYS.has(event.code)) return
+  // never steal a shortcut (Cmd+W closes the tab) or a keystroke meant for a field
+  if (event.metaKey || event.ctrlKey || event.altKey) return
+  const target = event.target as HTMLElement
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+
+  event.preventDefault()
+  heldPanKeys.add(event.code)
+  startPanning()
+}
+
+function onPanKeyUp(event: KeyboardEvent) {
+  heldPanKeys.delete(event.code)
+}
+
+/** A key held while the window loses focus never sends its keyup — so drop them all. */
+function releaseAllPanKeys() {
+  heldPanKeys.clear()
+}
+
+function startPanning() {
+  if (panFrame !== undefined) return
+  lastPanTime = performance.now()
+  const step = (now: number): void => {
+    // seconds since the last frame, capped so a background tab doesn't lurch
+    const elapsed = Math.min((now - lastPanTime) / 1000, 0.1)
+    lastPanTime = now
+
+    if (heldPanKeys.size === 0 || !camera || !controls) {
+      panFrame = undefined
+      return
+    }
+
+    const cameraUp = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1)
+    const forward = groundForward(camera.position, controls.target, cameraUp)
+    const direction = forward && panDirection(heldPanKeys, forward)
+    if (direction) {
+      const distance = panDistance(camera.position.distanceTo(controls.target), elapsed)
+      const move = new THREE.Vector3(direction.x, 0, direction.z).multiplyScalar(distance)
+      // camera and target move together: this is a pan, so the orbit is unchanged
+      camera.position.add(move)
+      controls.target.add(move)
+      controls.update()
+      requestRender()
+    }
+    panFrame = requestAnimationFrame(step)
+  }
+  panFrame = requestAnimationFrame(step)
+}
+
 function resize() {
   if (!container.value || !renderer || !camera) return
   const { width, height } = container.value.getBoundingClientRect()
@@ -227,6 +295,9 @@ onMounted(() => {
   controls.enableDamping = false
   // keep the camera above ground so you can't orbit under the floor
   controls.maxPolarAngle = Math.PI / 2 - 0.05
+  // don't let the camera dolly all the way onto its own target: the look
+  // direction degenerates there, and with it every direction derived from it
+  controls.minDistance = MIN_ORBIT_DISTANCE_CM
   controls.addEventListener('change', requestRender)
 
   rebuild()
@@ -235,6 +306,10 @@ onMounted(() => {
 
   resizeObserver = new ResizeObserver(resize)
   resizeObserver.observe(container.value)
+
+  window.addEventListener('keydown', onPanKeyDown)
+  window.addEventListener('keyup', onPanKeyUp)
+  window.addEventListener('blur', releaseAllPanKeys)
 })
 
 // the document is non-reactive; the store bumps `revision` on every change
@@ -252,6 +327,11 @@ watch(
 
 onBeforeUnmount(() => {
   saveCamera()
+  window.removeEventListener('keydown', onPanKeyDown)
+  window.removeEventListener('keyup', onPanKeyUp)
+  window.removeEventListener('blur', releaseAllPanKeys)
+  releaseAllPanKeys()
+  if (panFrame !== undefined) cancelAnimationFrame(panFrame)
   if (frameId !== undefined) cancelAnimationFrame(frameId)
   resizeObserver?.disconnect()
   disposeContent()
