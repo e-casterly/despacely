@@ -20,6 +20,9 @@ export interface Node {
 
 export type OpeningKind = 'door' | 'window'
 
+/** Which side of a wall a door swings towards: +1 is the wall's left, (-dy, dx). */
+export type SwingSide = 1 | -1
+
 /**
  * A door or window cut into a wall. The two kinds differ only by `sill` (a door
  * sits on the floor) and by the symbol the plan draws for them.
@@ -41,6 +44,12 @@ export interface Opening {
   height: number
   /** height of the bottom edge above the floor; 0 for a door */
   sill: number
+  /**
+   * Which side of the wall a door swings towards, chosen from the cursor's side
+   * as it is placed. Absent means "derive it" — into the room (see `doorSwingSide`)
+   * — which is how openings placed before this, and windows (symmetric), read.
+   */
+  side?: SwingSide
 }
 
 export interface Wall {

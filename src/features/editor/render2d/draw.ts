@@ -9,7 +9,7 @@ import { nodeAt } from '../domain/operations'
 import type { Guide } from '../domain/snapping'
 import { detectRooms, roomKey, type Room } from '../domain/rooms'
 import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
-import type { NodeId, OpeningKind, SceneDocument, Vec2, Wall } from '../domain/types'
+import type { NodeId, OpeningKind, SceneDocument, SwingSide, Vec2, Wall } from '../domain/types'
 import type { GhostOpening, Selection, ToolOverlay } from '../tools/types'
 import type { EditorPalette } from '../palette'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
@@ -87,7 +87,7 @@ export function render(
     )
     drawOpenings(ctx, vp, ghost?.doc ?? viewDoc, openings, rooms, palette, selectedOpeningId)
     if (view.overlay?.ghostOpening) {
-      drawGhostOpening(ctx, vp, rooms, view.overlay.ghostOpening, palette)
+      drawGhostOpening(ctx, vp, view.overlay.ghostOpening, palette)
     }
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc, palette)
@@ -580,9 +580,6 @@ const OPENING_SYMBOL_PX = 1
  *  of the jambs. */
 const WINDOW_PANE_INSET = 1 / 6
 
-/** Which side of a wall a door swings towards: +1 is the wall's left, (-dy, dx). */
-export type SwingSide = 1 | -1
-
 /** The plan symbol for a door: the leaf standing open, and the arc it sweeps. */
 export interface DoorSwing {
   /** the jamb the door is hung on (the one nearer node A) */
@@ -701,8 +698,12 @@ function drawOpenings(
         ctx.globalAlpha = 1
       }
 
+      // the side placement chose, else derived into the room (windows ignore it)
+      const side =
+        opening.side ??
+        (opening.kind === 'door' ? doorSwingSide(rooms, span, wall.thickness) : 1)
       ctx.strokeStyle = selected ? palette.accent : palette.opening
-      traceOpeningSymbol(ctx, opening.kind, span, wall.thickness, rooms)
+      traceOpeningSymbol(ctx, opening.kind, span, wall.thickness, side)
       ctx.stroke()
     }
   }
@@ -718,7 +719,7 @@ function traceOpeningSymbol(
   kind: OpeningKind,
   span: OpeningSpan,
   thickness: number,
-  rooms: Room[],
+  side: SwingSide,
 ): void {
   ctx.beginPath()
   if (kind === 'window') {
@@ -727,7 +728,7 @@ function traceOpeningSymbol(
       ctx.lineTo(to.x, to.y)
     }
   } else {
-    const swing = doorSwing(span, doorSwingSide(rooms, span, thickness))
+    const swing = doorSwing(span, side)
     ctx.moveTo(swing.hinge.x, swing.hinge.y)
     ctx.lineTo(swing.leafTip.x, swing.leafTip.y)
     ctx.arc(
@@ -754,7 +755,6 @@ const GHOST_OPENING_ALPHA = 0.6
 function drawGhostOpening(
   ctx: CanvasRenderingContext2D,
   vp: Viewport,
-  rooms: Room[],
   ghost: GhostOpening,
   palette: EditorPalette,
 ): void {
@@ -769,7 +769,7 @@ function drawGhostOpening(
   ctx.strokeStyle = palette.accent
   ctx.lineWidth = OPENING_SYMBOL_PX / vp.zoom
   ctx.lineCap = 'round'
-  traceOpeningSymbol(ctx, ghost.kind, span, thickness, rooms)
+  traceOpeningSymbol(ctx, ghost.kind, span, thickness, ghost.side)
   ctx.stroke()
   ctx.globalAlpha = 1
 }

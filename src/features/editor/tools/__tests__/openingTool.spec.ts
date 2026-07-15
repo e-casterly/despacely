@@ -32,8 +32,19 @@ describe('openingTool', () => {
     expect(apply).toHaveBeenCalledOnce()
     expect(apply.mock.calls[0]![0]).toBeInstanceOf(AddOpeningCommand)
     expect(openingsOf(doc)).toEqual([
-      { id: expect.any(String), kind: 'door', offset: 150, width: DOOR_WIDTH, height: 210, sill: 0 },
+      { id: expect.any(String), kind: 'door', offset: 150, width: DOOR_WIDTH, height: 210, sill: 0, side: 1 },
     ])
+  })
+
+  it('takes its swing side from the cursor: the two faces open opposite ways', () => {
+    // the wall runs along +x, so its left normal (-dy, dx) points to +y
+    const below = setup()
+    createOpeningTool('door').onPointerDown!(at(150, 8), below.ctx)
+    expect(openingsOf(below.doc)[0]!.side).toBe(1)
+
+    const above = setup()
+    createOpeningTool('door').onPointerDown!(at(150, -8), above.ctx)
+    expect(openingsOf(above.doc)[0]!.side).toBe(-1)
   })
 
   it('places a window with a sill, unlike a door', () => {

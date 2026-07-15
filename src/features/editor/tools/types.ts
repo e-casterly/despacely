@@ -1,7 +1,7 @@
 import type { Command } from '../domain/commands'
 import type { OpeningSpan } from '../domain/openings'
 import type { Guide } from '../domain/snapping'
-import type { NodeId, OpeningKind, SceneDocument, Vec2 } from '../domain/types'
+import type { NodeId, OpeningKind, SceneDocument, SwingSide, Vec2 } from '../domain/types'
 
 /** The editor's active interaction mode. 'select' is the neutral mode.
  * 'door' and 'window' are the two OpeningKinds, so one tool factory serves both. */
@@ -39,6 +39,8 @@ export interface GhostOpening {
   kind: OpeningKind
   span: OpeningSpan
   thickness: number
+  /** the swing side the door will take — the cursor's side of the wall when snapped */
+  side: SwingSide
 }
 
 /** Transient visuals a tool draws over the scene (e.g. the wall being placed). */
