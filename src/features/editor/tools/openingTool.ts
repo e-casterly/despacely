@@ -1,9 +1,9 @@
 import { AddOpeningCommand } from '../domain/commands'
 import { projectOnSegment } from '../domain/geometry'
-import { offsetRange, openingSpan, overlapsAnotherOpening } from '../domain/openings'
+import { offsetRange, openingSpan, overlapsAnotherOpening, sideOfWall } from '../domain/openings'
 import type { Guide } from '../domain/snapping'
 import { wallSegment, wallUnderPoint } from '../domain/operations'
-import type { Opening, OpeningKind, SwingSide, Vec2 } from '../domain/types'
+import type { Opening, OpeningKind, Vec2 } from '../domain/types'
 import {
   DOOR_HEIGHT,
   DOOR_WIDTH,
@@ -64,7 +64,7 @@ export function createOpeningTool(kind: OpeningKind): Tool {
     const clicked = projectOnSegment(world, a, b).t * length
     // the door swings toward whichever face the cursor is nearer: moving the mouse
     // across the centerline to the other side of the wall flips the direction
-    const side = cursorSide(world, a, b, length)
+    const side = sideOfWall(world, a, b)
     const opening: Opening = {
       id: crypto.randomUUID(),
       kind,
@@ -82,15 +82,6 @@ export function createOpeningTool(kind: OpeningKind): Tool {
       guide: { kind: 'edge', a: { ...a }, b: { ...b } },
       placement: { wallId: wall.id, opening },
     }
-  }
-
-  /** Which side of the wall centerline the cursor is on: +1 is the wall's left,
-   *  (-dy, dx), matching {@link SwingSide}. A cursor exactly on the axis reads as +1. */
-  function cursorSide(world: Vec2, a: Vec2, b: Vec2, length: number): SwingSide {
-    if (length === 0) return 1
-    // (world - a) projected onto the left normal (-dy, dx)/length
-    const perp = ((world.x - a.x) * -(b.y - a.y) + (world.y - a.y) * (b.x - a.x)) / length
-    return perp >= 0 ? 1 : -1
   }
 
   /** The ghost floating free at the cursor, at a default size and orientation —

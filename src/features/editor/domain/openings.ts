@@ -1,6 +1,6 @@
 import { clipPolygon, pointInPolygon } from './geometry'
 import { wallSegment } from './operations'
-import type { Opening, SceneDocument, Vec2, Wall } from './types'
+import type { Opening, SceneDocument, SwingSide, Vec2, Wall } from './types'
 import { computeWallGeometry, type WallFaces, type WallGeometry } from './wallJoints'
 
 /**
@@ -141,6 +141,18 @@ export function offsetRange(
   const min = clear.from + width / 2
   const max = clear.to - width / 2
   return min > max ? null : { min, max }
+}
+
+/**
+ * Which side of the directed wall segment a→b a point lies on: +1 is the wall's
+ * left, (-dy, dx), matching {@link SwingSide}; a point on the axis reads as +1.
+ *
+ * A door's swing side is chosen from this as it is placed or dragged — moving the
+ * pointer across the centerline to the far face flips the direction.
+ */
+export function sideOfWall(point: Vec2, a: Vec2, b: Vec2): SwingSide {
+  const perp = (point.x - a.x) * -(b.y - a.y) + (point.y - a.y) * (b.x - a.x)
+  return perp >= 0 ? 1 : -1
 }
 
 /** An opening the pointer is over, with the wall it belongs to and where it sits. */

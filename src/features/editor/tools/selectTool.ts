@@ -3,9 +3,10 @@ import {
   MoveNodeCommand,
   MoveNodesCommand,
   SetOpeningPropsCommand,
+  type OpeningProps,
 } from '../domain/commands'
 import { projectOnSegment } from '../domain/geometry'
-import { offsetRange, openingAtPoint, overlapsAnotherOpening } from '../domain/openings'
+import { offsetRange, openingAtPoint, overlapsAnotherOpening, sideOfWall } from '../domain/openings'
 import {
   collapsesAWall,
   findWall,
@@ -16,7 +17,7 @@ import {
 } from '../domain/operations'
 import { roomAt, roomKey } from '../domain/rooms'
 import { resolveSnap, type Guide } from '../domain/snapping'
-import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
+import type { NodeId, SceneDocument, SwingSide, Vec2 } from '../domain/types'
 import { computeWallGeometry } from '../domain/wallJoints'
 import type { PointerInput, Tool, ToolContext, ToolOverlay } from './types'
 
@@ -48,6 +49,10 @@ type Drag =
       range: { min: number; max: number }
       from: number
       to: number
+      /** a door's swing side follows the pointer's face of the wall, like placement
+       *  does; `fromSide` is where it started, so a commit fires when either changes */
+      fromSide: SwingSide | undefined
+      side: SwingSide | undefined
     }
 
 /** How far along the wall's centerline (cm from node A) a point sits. */
@@ -123,7 +128,10 @@ export function createSelectTool(): Tool {
     get preview(): ToolOverlay | null {
       if (!drag) return null
       if (drag.kind === 'opening') {
-        return drag.to === drag.from ? null : { movedOpening: { id: drag.openingId, offset: drag.to } }
+        const changed = drag.to !== drag.from || drag.side !== drag.fromSide
+        return changed
+          ? { movedOpening: { id: drag.openingId, offset: drag.to, side: drag.side } }
+          : null
       }
       const overlay: ToolOverlay = {}
       const moved = draggedNodes(drag)
@@ -171,6 +179,8 @@ export function createSelectTool(): Tool {
           range,
           from: hit.opening.offset,
           to: hit.opening.offset,
+          fromSide: hit.opening.side,
+          side: hit.opening.side,
         }
         return
       }
@@ -213,6 +223,7 @@ export function createSelectTool(): Tool {
           drag.guides = []
         } else if (drag.kind === 'opening') {
           drag.to = drag.from
+          drag.side = drag.fromSide
         } else {
           drag.delta = { x: 0, y: 0 }
           drag.guides = []
@@ -235,6 +246,10 @@ export function createSelectTool(): Tool {
         // a neighbouring opening blocks the way: hold at the last good offset
         // rather than sliding through it (the collapsesAWall refusal idiom)
         if (!overlapsAnotherOpening(wall, { ...moved, offset: next })) drag.to = next
+        // a door also re-picks its swing side from the pointer's face of the wall,
+        // so a perpendicular drag flips it even when it slides nowhere; windows are
+        // symmetric, so theirs is left as-is
+        drag.side = moved.kind === 'door' ? sideOfWall(input.world, sliding.a, sliding.b) : moved.side
         return
       }
       if (drag.kind === 'node') {
@@ -284,8 +299,11 @@ export function createSelectTool(): Tool {
     onPointerUp(_input: PointerInput, ctx: ToolContext) {
       if (!drag) return
       if (drag.kind === 'opening') {
-        if (drag.to !== drag.from) {
-          ctx.apply(new SetOpeningPropsCommand(drag.openingId, { offset: drag.to }))
+        const props: OpeningProps = {}
+        if (drag.to !== drag.from) props.offset = drag.to
+        if (drag.side !== drag.fromSide && drag.side !== undefined) props.side = drag.side
+        if (Object.keys(props).length > 0) {
+          ctx.apply(new SetOpeningPropsCommand(drag.openingId, props))
         }
         drag = null
         return

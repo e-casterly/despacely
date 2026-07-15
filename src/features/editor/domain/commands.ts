@@ -17,7 +17,7 @@ import {
   type WallOptions,
 } from './operations'
 import { roomExclusiveWalls } from './rooms'
-import type { Item, Node, NodeId, Opening, SceneDocument, Vec2, Wall } from './types'
+import type { Item, Node, NodeId, Opening, SceneDocument, SwingSide, Vec2, Wall } from './types'
 
 /**
  * A reversible edit. Every document mutation goes through a command so the
@@ -424,6 +424,7 @@ export interface OpeningProps {
   width?: number
   height?: number
   sill?: number
+  side?: SwingSide
 }
 
 /**
@@ -452,6 +453,7 @@ export class SetOpeningPropsCommand implements Command {
       width: opening.width,
       height: opening.height,
       sill: opening.sill,
+      side: opening.side,
     }
     Object.assign(opening, this.props)
   }

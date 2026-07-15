@@ -538,7 +538,37 @@ describe('selectTool opening drag', () => {
     tool.onPointerDown!(at(100, 0), ctx)
     tool.onPointerMove!(at(150, 0), ctx)
 
-    expect(tool.preview).toEqual({ movedOpening: { id: 'o1', offset: 150 } })
+    // the wall runs along +x, so its left face (+1) is the +y side the drag sits on
+    expect(tool.preview).toEqual({ movedOpening: { id: 'o1', offset: 150, side: 1 } })
     expect(offsetOf(doc, 'o1')).toBe(100) // still where it was
+  })
+
+  const sideOf = (doc: SceneDocument, id: string) =>
+    doc.walls.flatMap((w) => w.openings).find((o) => o.id === id)!.side
+
+  it('flips a door’s swing side when dragged across to the far face', () => {
+    const { doc } = docWithOpening()
+
+    // grabbed on the +y face, dragged straight across to the -y face at the same offset
+    const { apply } = dragFrom(doc, { x: 100, y: 8 }, { x: 100, y: -8 })
+
+    expect(apply).toHaveBeenCalledOnce()
+    expect(sideOf(doc, 'o1')).toBe(-1) // swung to the far face
+    expect(offsetOf(doc, 'o1')).toBe(100) // without sliding along
+  })
+
+  it('leaves a symmetric window’s side untouched (nothing to flip)', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const wall = addWall(doc, a, b, { thickness: 20 })
+    wall.openings = [{ id: 'w1', kind: 'window', offset: 100, width: 40, height: 120, sill: 90 }]
+
+    // dragging a window straight across the wall changes neither offset nor side,
+    // so there is nothing to commit
+    const { apply } = dragFrom(doc, { x: 100, y: 8 }, { x: 100, y: -8 })
+
+    expect(apply).not.toHaveBeenCalled()
+    expect(sideOf(doc, 'w1')).toBeUndefined()
   })
 })

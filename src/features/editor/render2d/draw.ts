@@ -159,17 +159,20 @@ function withMovedNodes(doc: SceneDocument, moved: Record<NodeId, Vec2>): SceneD
   return { ...doc, nodes }
 }
 
-/** Render-only copy of the doc with one opening slid along its wall. */
+/** Render-only copy of the doc with one opening slid along its wall (and, for a
+ *  door, swung to a new side). */
 function withMovedOpening(
   doc: SceneDocument,
-  moved: { id: string; offset: number },
+  moved: { id: string; offset: number; side?: SwingSide },
 ): SceneDocument {
   const walls = doc.walls.map((wall) =>
     wall.openings.some((opening) => opening.id === moved.id)
       ? {
           ...wall,
           openings: wall.openings.map((opening) =>
-            opening.id === moved.id ? { ...opening, offset: moved.offset } : opening,
+            opening.id === moved.id
+              ? { ...opening, offset: moved.offset, side: moved.side ?? opening.side }
+              : opening,
           ),
         }
       : wall,

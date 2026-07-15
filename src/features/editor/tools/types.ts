@@ -52,8 +52,9 @@ export interface ToolOverlay {
   roomDraft?: Vec2[]
   /** Drag preview: render these nodes (and walls on them) at overridden positions. */
   movedNodes?: Record<NodeId, Vec2>
-  /** Drag preview: render this opening slid to a different offset along its wall. */
-  movedOpening?: { id: string; offset: number }
+  /** Drag preview: render this opening slid to a different offset along its wall,
+   * and (for a door) swinging to the side the pointer crossed to. */
+  movedOpening?: { id: string; offset: number; side?: SwingSide }
   /** Placement preview for the door/window tools: a translucent ghost tracking the
    * cursor, snapped onto a wall when over one and floating free otherwise. */
   ghostOpening?: GhostOpening
