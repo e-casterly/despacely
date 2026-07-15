@@ -159,6 +159,15 @@ function onPointerUp(event: PointerEvent) {
   }
 }
 
+function onPointerLeave() {
+  // drop any hover-only preview (e.g. the door/window ghost) as the cursor exits
+  const tool = currentTool()
+  if (tool?.onPointerLeave) {
+    tool.onPointerLeave()
+    requestRepaint()
+  }
+}
+
 /** one +/- button click; two clicks double the zoom */
 const BUTTON_ZOOM = Math.SQRT2
 
@@ -271,6 +280,7 @@ onBeforeUnmount(() => {
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
+      @pointerleave="onPointerLeave"
     />
 
     <div

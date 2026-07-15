@@ -9,8 +9,8 @@ import { nodeAt } from '../domain/operations'
 import type { Guide } from '../domain/snapping'
 import { detectRooms, roomKey, type Room } from '../domain/rooms'
 import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
-import type { NodeId, SceneDocument, Vec2, Wall } from '../domain/types'
-import type { Selection, ToolOverlay } from '../tools/types'
+import type { NodeId, OpeningKind, SceneDocument, Vec2, Wall } from '../domain/types'
+import type { GhostOpening, Selection, ToolOverlay } from '../tools/types'
 import type { EditorPalette } from '../palette'
 import { screenToWorld, worldToScreen, type Viewport } from './viewport'
 import { computeWallGeometry, type WallFaces, type WallGeometry } from '../domain/wallJoints'
@@ -86,6 +86,9 @@ export function render(
       ghost?.ghostIds ?? null,
     )
     drawOpenings(ctx, vp, ghost?.doc ?? viewDoc, openings, rooms, palette, selectedOpeningId)
+    if (view.overlay?.ghostOpening) {
+      drawGhostOpening(ctx, vp, rooms, view.overlay.ghostOpening, palette)
+    }
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
     drawItems(ctx, vp, viewDoc, palette)
     drawRoomLabels(ctx, vp, rooms, palette)
@@ -699,28 +702,76 @@ function drawOpenings(
       }
 
       ctx.strokeStyle = selected ? palette.accent : palette.opening
-      ctx.beginPath()
-      if (opening.kind === 'window') {
-        for (const [from, to] of windowPanes(span, wall.thickness)) {
-          ctx.moveTo(from.x, from.y)
-          ctx.lineTo(to.x, to.y)
-        }
-      } else {
-        const swing = doorSwing(span, doorSwingSide(rooms, span, wall.thickness))
-        ctx.moveTo(swing.hinge.x, swing.hinge.y)
-        ctx.lineTo(swing.leafTip.x, swing.leafTip.y)
-        ctx.arc(
-          swing.hinge.x,
-          swing.hinge.y,
-          swing.radius,
-          swing.startAngle,
-          swing.endAngle,
-          swing.counterclockwise,
-        )
-      }
+      traceOpeningSymbol(ctx, opening.kind, span, wall.thickness, rooms)
       ctx.stroke()
     }
   }
+}
+
+/**
+ * Traces a door's swing (leaf + arc) or a window's two panes into the current
+ * path, ready to stroke. Shared by the placed openings and the placement ghost
+ * so the preview draws the exact symbol the committed opening will.
+ */
+function traceOpeningSymbol(
+  ctx: CanvasRenderingContext2D,
+  kind: OpeningKind,
+  span: OpeningSpan,
+  thickness: number,
+  rooms: Room[],
+): void {
+  ctx.beginPath()
+  if (kind === 'window') {
+    for (const [from, to] of windowPanes(span, thickness)) {
+      ctx.moveTo(from.x, from.y)
+      ctx.lineTo(to.x, to.y)
+    }
+  } else {
+    const swing = doorSwing(span, doorSwingSide(rooms, span, thickness))
+    ctx.moveTo(swing.hinge.x, swing.hinge.y)
+    ctx.lineTo(swing.leafTip.x, swing.leafTip.y)
+    ctx.arc(
+      swing.hinge.x,
+      swing.hinge.y,
+      swing.radius,
+      swing.startAngle,
+      swing.endAngle,
+      swing.counterclockwise,
+    )
+  }
+}
+
+/** Symbol opacity of the placement ghost — stronger than its wash, still clearly a preview. */
+const GHOST_OPENING_ALPHA = 0.6
+
+/**
+ * The door/window placement preview: a translucent accent wash over the cut it
+ * would make, plus its symbol. The span is resolved by the tool — snapped onto a
+ * wall or floating free at the cursor — so this just draws it. An overlay (the
+ * wall is never actually carved), so it reads as a ghost and costs nothing to
+ * redraw as the pointer moves.
+ */
+function drawGhostOpening(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  rooms: Room[],
+  ghost: GhostOpening,
+  palette: EditorPalette,
+): void {
+  const { span, thickness } = ghost
+  ctx.globalAlpha = SELECTED_OPENING_ALPHA
+  ctx.fillStyle = palette.accent
+  ctx.beginPath()
+  tracePoly(ctx, openingRect(span, thickness))
+  ctx.fill()
+
+  ctx.globalAlpha = GHOST_OPENING_ALPHA
+  ctx.strokeStyle = palette.accent
+  ctx.lineWidth = OPENING_SYMBOL_PX / vp.zoom
+  ctx.lineCap = 'round'
+  traceOpeningSymbol(ctx, ghost.kind, span, thickness, rooms)
+  ctx.stroke()
+  ctx.globalAlpha = 1
 }
 
 /** Appends one closed ring to the current path (no fill). */
