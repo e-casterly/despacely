@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { addNode, addWall, addWallBetween, createEmptyDocument, removeWall } from '../operations'
-import { detectRooms, roomAt, roomExclusiveWalls, roomKey } from '../rooms'
+import { detectRooms, insideAnyRoom, roomAt, roomExclusiveWalls, roomKey, wallFaceSides } from '../rooms'
+import { computeWallGeometry } from '../wallJoints'
 import type { NodeId, SceneDocument, Vec2 } from '../types'
 
 /** Adds nodes at the given points and walls closing them into a ring. */
@@ -284,5 +285,71 @@ describe('detectRooms', () => {
     for (const point of room!.polygon) {
       expect(nodePositions).not.toContain(point)
     }
+  })
+})
+
+describe('insideAnyRoom', () => {
+  it('tells room floor from outside', () => {
+    const doc = createEmptyDocument()
+    ring(doc, square(0, 0, 200))
+    const rooms = detectRooms(doc)
+
+    expect(insideAnyRoom(rooms, { x: 100, y: 100 })).toBe(true)
+    expect(insideAnyRoom(rooms, { x: 300, y: 100 })).toBe(false)
+  })
+})
+
+describe('wallFaceSides', () => {
+  const facesOf = (doc: SceneDocument, index: number) =>
+    computeWallGeometry(doc).faces.get(doc.walls[index]!.id)!
+
+  it('reports room-side face shorter and outer face longer on a square room', () => {
+    const doc = createEmptyDocument()
+    ring(doc, square(0, 0, 200)) // default thickness 10 → miter eats 5 per corner
+
+    const sides = wallFaceSides(detectRooms(doc), facesOf(doc, 0))
+    const [inner, outer] = sides.left.bordersRoom
+      ? [sides.left, sides.right]
+      : [sides.right, sides.left]
+
+    expect(inner.bordersRoom).toBe(true)
+    expect(outer.bordersRoom).toBe(false)
+    expect(inner.length).toBeCloseTo(190, 6)
+    expect(outer.length).toBeCloseTo(210, 6)
+  })
+
+  it('reports both faces at axis length and no rooms on a standalone wall', () => {
+    const doc = createEmptyDocument()
+    chain(doc, [
+      { x: 0, y: 0 },
+      { x: 200, y: 0 },
+    ])
+
+    const sides = wallFaceSides(detectRooms(doc), facesOf(doc, 0))
+
+    expect(sides.left).toEqual({ length: 200, bordersRoom: false })
+    expect(sides.right).toEqual({ length: 200, bordersRoom: false })
+  })
+
+  it('reports rooms on both sides of a shared partition wall', () => {
+    const doc = createEmptyDocument()
+    ring(doc, square(0, 0, 200))
+    // second room shares the x=200 wall; only its three outer edges are added
+    const extension = [
+      { x: 200, y: 0 },
+      { x: 400, y: 0 },
+      { x: 400, y: 200 },
+      { x: 200, y: 200 },
+    ]
+    for (let i = 0; i < extension.length - 1; i++) {
+      addWallBetween(doc, extension[i]!, extension[i + 1]!, { snapDist: 1 })
+    }
+
+    const shared = wallFaceSides(detectRooms(doc), facesOf(doc, 1)) // the x=200 wall
+    expect(shared.left.bordersRoom).toBe(true)
+    expect(shared.right.bordersRoom).toBe(true)
+    // a T-junction at each end trims both faces by the crossing wall's half thickness
+    expect(shared.left.length).toBeCloseTo(190, 6)
+    expect(shared.right.length).toBeCloseTo(190, 6)
   })
 })

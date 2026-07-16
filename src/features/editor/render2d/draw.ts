@@ -7,7 +7,7 @@ import {
 } from '../domain/openings'
 import { nodeAt } from '../domain/operations'
 import type { Guide } from '../domain/snapping'
-import { detectRooms, roomKey, type Room } from '../domain/rooms'
+import { detectRooms, insideAnyRoom, roomKey, type Room } from '../domain/rooms'
 import { squareCmToM2, WALL_HEIGHT, WALL_THICKNESS } from '../domain/units'
 import type { NodeId, OpeningKind, SceneDocument, SwingSide, Vec2, Wall } from '../domain/types'
 import type { GhostOpening, Selection, ToolOverlay } from '../tools/types'
@@ -656,14 +656,9 @@ export function doorSwingSide(rooms: Room[], span: OpeningSpan, thickness: numbe
     x: mid.x + left.x * reach * sign,
     y: mid.y + left.y * reach * sign,
   })
-  const encloses = (p: Vec2): boolean =>
-    rooms.some(
-      (room) =>
-        pointInPolygon(p, room.polygon) && !room.holes.some((hole) => pointInPolygon(p, hole)),
-    )
 
-  const onLeft = encloses(probe(1))
-  const onRight = encloses(probe(-1))
+  const onLeft = insideAnyRoom(rooms, probe(1))
+  const onRight = insideAnyRoom(rooms, probe(-1))
   if (onRight && !onLeft) return -1
   return 1
 }

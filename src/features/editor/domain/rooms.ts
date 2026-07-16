@@ -1,5 +1,6 @@
 import { pointInPolygon } from './geometry'
 import type { NodeId, SceneDocument, Vec2, Wall } from './types'
+import type { WallFaces } from './wallJoints'
 
 /**
  * A closed contour in the wall graph. Rooms are derived from the graph on
@@ -145,6 +146,51 @@ export function roomExclusiveWalls(doc: SceneDocument, key: string): Wall[] {
     if (!shared.has(edge)) contour.add(edge)
   }
   return doc.walls.filter((wall) => contour.has(pair(wall.a, wall.b)))
+}
+
+/** Whether the point lies on some room's floor (holes excluded). */
+export function insideAnyRoom(rooms: Room[], pos: Vec2): boolean {
+  return rooms.some(
+    (room) =>
+      pointInPolygon(pos, room.polygon) && !room.holes.some((hole) => pointInPolygon(pos, hole)),
+  )
+}
+
+/** How far past a face the room probe lands (cm) — just clear of the face itself. */
+const FACE_PROBE_REACH = 1
+
+/** One mitered side face of a wall, as the inspector reports it. */
+export interface FaceSide {
+  /** finished face length between the mitred corners, cm */
+  length: number
+  /** a room floor lies just past this face */
+  bordersRoom: boolean
+}
+
+/**
+ * Finished lengths of a wall's two mitered faces, and whether each borders a
+ * room — probed just past the face midpoint, the doorSwingSide idiom. `left`
+ * is WallFaces.left, the (-dy, dx) side of the wall's a→b axis. A face that
+ * mitring collapsed to a point reports length 0 and no room (its outward
+ * direction is undefined).
+ */
+export function wallFaceSides(
+  rooms: Room[],
+  faces: WallFaces,
+): { left: FaceSide; right: FaceSide } {
+  const side = (face: readonly [Vec2, Vec2], outward: 1 | -1): FaceSide => {
+    const dx = face[1].x - face[0].x
+    const dy = face[1].y - face[0].y
+    const length = Math.hypot(dx, dy)
+    if (length === 0) return { length: 0, bordersRoom: false }
+    const probe = {
+      x: (face[0].x + face[1].x) / 2 + (-dy / length) * FACE_PROBE_REACH * outward,
+      y: (face[0].y + face[1].y) / 2 + (dx / length) * FACE_PROBE_REACH * outward,
+    }
+    return { length, bordersRoom: insideAnyRoom(rooms, probe) }
+  }
+  // the left face's outward normal is the wall's left normal; the right face's is its negation
+  return { left: side(faces.left, 1), right: side(faces.right, -1) }
 }
 
 /**

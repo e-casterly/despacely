@@ -21,7 +21,7 @@ import {
   wallsAtNode,
   wallSegment,
 } from '../domain/operations'
-import { findRoom } from '../domain/rooms'
+import { detectRooms, findRoom, wallFaceSides } from '../domain/rooms'
 import { squareCmToM2 } from '../domain/units'
 import { computeWallGeometry } from '../domain/wallJoints'
 import { useEditorStore } from '../store/editorStore'
@@ -40,6 +40,14 @@ const PROP_LIMITS = {
   thickness: { min: 3, max: 150 },
   height: { min: 30, max: 1000 },
 } as const
+
+/**
+ * Length is not a stored wall prop — it is the distance between the endpoints,
+ * edited by sliding node B along the a→b axis. The floor keeps a committed edit
+ * from collapsing the wall (the guard catches the rest); the ceiling is the same
+ * ±1 km typo clamp the coordinates use.
+ */
+const LENGTH_LIMIT = { min: 1, max: 100_000 } as const
 
 /** Coordinates carry no physical meaning, so the clamp only guards typos (±1 km). */
 const COORD_LIMIT = { min: -100_000, max: 100_000 }
@@ -62,7 +70,41 @@ const wall = useDocSnapshot((doc) => {
   const found = findWall(doc, editor.selection.id)
   if (!found) return null
   const { a, b } = wallSegment(doc, found)
-  return { ...found, length: Math.round(Math.hypot(b.x - a.x, b.y - a.y) * 10) / 10 }
+  const faces = computeWallGeometry(doc).faces.get(found.id)
+  return {
+    ...found,
+    length: Math.round(Math.hypot(b.x - a.x, b.y - a.y) * 10) / 10,
+    sides: faces ? wallFaceSides(detectRooms(doc), faces) : null,
+  }
+})
+
+/**
+ * Read-only finished-face rows for the wall block. Hidden while both faces
+ * match the axis (a free-standing wall carries no extra information). Labelled
+ * Inner/Outer only when exactly one side borders a room; a partition between
+ * two rooms (or a roomless corner) shows both faces in one row instead — the
+ * plan already labels each face on its own side.
+ */
+const faceRows = computed(() => {
+  const current = wall.value
+  if (!current?.sides) return []
+  const left = Math.round(current.sides.left.length * 10) / 10
+  const right = Math.round(current.sides.right.length * 10) / 10
+  if (left === current.length && right === current.length) return []
+  if (current.sides.left.bordersRoom !== current.sides.right.bordersRoom) {
+    const [inner, outer] = current.sides.left.bordersRoom ? [left, right] : [right, left]
+    return [
+      { label: 'Inner face', value: `${inner} cm`, hint: 'Finished length along the room side' },
+      { label: 'Outer face', value: `${outer} cm`, hint: 'Finished length along the far side' },
+    ]
+  }
+  return [
+    {
+      label: 'Faces',
+      value: `${left} / ${right} cm`,
+      hint: 'Finished face lengths, each labelled on its own side on the plan',
+    },
+  ]
 })
 
 const node = useDocSnapshot((doc) => {
@@ -127,6 +169,23 @@ function commitWallProp(key: keyof typeof PROP_LIMITS, next: number) {
   if (wall.value) editor.apply(new SetWallPropsCommand(wall.value.id, { [key]: next }))
 }
 
+// Setting a length keeps node A fixed and slides node B along the wall's own
+// direction — the same deformation as dragging B, so a shared endpoint carries
+// its other walls along. One MoveNodeCommand, undone in a single step.
+function commitWallLength(next: number) {
+  if (!wall.value || !editor.doc) return
+  const found = findWall(editor.doc, wall.value.id)
+  if (!found) return
+  const { a, b } = wallSegment(editor.doc, found)
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  if (len === 0) return // invariant forbids it, but this guards the divide
+  const scale = next / len
+  const to = { x: a.x + (b.x - a.x) * scale, y: a.y + (b.y - a.y) * scale }
+  // refuse a length that would collapse a wall meeting at B; the field snaps back
+  if (collapsesAWall(editor.doc, { [found.b]: to })) return
+  editor.apply(new MoveNodeCommand(found.b, { x: b.x, y: b.y }, to))
+}
+
 function commitOpeningProp(key: keyof OpeningProps, next: number) {
   if (!opening.value || !editor.doc) return
   const found = findOpening(editor.doc, opening.value.id)
@@ -177,8 +236,23 @@ function commitNodeCoord(axis: 'x' | 'y', next: number) {
 
       <dl class="flex flex-col gap-2 text-sm">
         <div class="flex items-center justify-between">
-          <dt class="text-text-muted">Length</dt>
-          <dd>{{ wall.length }} cm</dd>
+          <dt class="text-text-muted" title="Slides the far end along the wall; the near end stays put">
+            Length
+          </dt>
+          <dd class="flex items-center gap-1.5">
+            <EditorNumberField
+              :value="wall.length"
+              :min="LENGTH_LIMIT.min"
+              :max="LENGTH_LIMIT.max"
+              label="Length, cm"
+              @commit="commitWallLength"
+            />
+            <span class="text-text-muted">cm</span>
+          </dd>
+        </div>
+        <div v-for="row in faceRows" :key="row.label" class="flex items-center justify-between">
+          <dt class="text-text-muted" :title="row.hint">{{ row.label }}</dt>
+          <dd>{{ row.value }}</dd>
         </div>
         <div class="flex items-center justify-between">
           <dt class="text-text-muted">Thickness</dt>
