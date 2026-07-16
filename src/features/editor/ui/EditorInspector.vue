@@ -41,13 +41,6 @@ const PROP_LIMITS = {
   height: { min: 30, max: 1000 },
 } as const
 
-/**
- * Length is not a stored wall prop — it is the distance between the endpoints,
- * edited by sliding node B along the a→b axis. The floor keeps a committed edit
- * from collapsing the wall (the guard catches the rest); the ceiling is the same
- * ±1 km typo clamp the coordinates use.
- */
-const LENGTH_LIMIT = { min: 1, max: 100_000 } as const
 
 /** Coordinates carry no physical meaning, so the clamp only guards typos (±1 km). */
 const COORD_LIMIT = { min: -100_000, max: 100_000 }
@@ -169,23 +162,6 @@ function commitWallProp(key: keyof typeof PROP_LIMITS, next: number) {
   if (wall.value) editor.apply(new SetWallPropsCommand(wall.value.id, { [key]: next }))
 }
 
-// Setting a length keeps node A fixed and slides node B along the wall's own
-// direction — the same deformation as dragging B, so a shared endpoint carries
-// its other walls along. One MoveNodeCommand, undone in a single step.
-function commitWallLength(next: number) {
-  if (!wall.value || !editor.doc) return
-  const found = findWall(editor.doc, wall.value.id)
-  if (!found) return
-  const { a, b } = wallSegment(editor.doc, found)
-  const len = Math.hypot(b.x - a.x, b.y - a.y)
-  if (len === 0) return // invariant forbids it, but this guards the divide
-  const scale = next / len
-  const to = { x: a.x + (b.x - a.x) * scale, y: a.y + (b.y - a.y) * scale }
-  // refuse a length that would collapse a wall meeting at B; the field snaps back
-  if (collapsesAWall(editor.doc, { [found.b]: to })) return
-  editor.apply(new MoveNodeCommand(found.b, { x: b.x, y: b.y }, to))
-}
-
 function commitOpeningProp(key: keyof OpeningProps, next: number) {
   if (!opening.value || !editor.doc) return
   const found = findOpening(editor.doc, opening.value.id)
@@ -236,19 +212,10 @@ function commitNodeCoord(axis: 'x' | 'y', next: number) {
 
       <dl class="flex flex-col gap-2 text-sm">
         <div class="flex items-center justify-between">
-          <dt class="text-text-muted" title="Slides the far end along the wall; the near end stays put">
+          <dt class="text-text-muted" title="Axis length; edit lengths by clicking a dimension on the plan">
             Length
           </dt>
-          <dd class="flex items-center gap-1.5">
-            <EditorNumberField
-              :value="wall.length"
-              :min="LENGTH_LIMIT.min"
-              :max="LENGTH_LIMIT.max"
-              label="Length, cm"
-              @commit="commitWallLength"
-            />
-            <span class="text-text-muted">cm</span>
-          </dd>
+          <dd>{{ wall.length }} cm</dd>
         </div>
         <div v-for="row in faceRows" :key="row.label" class="flex items-center justify-between">
           <dt class="text-text-muted" :title="row.hint">{{ row.label }}</dt>

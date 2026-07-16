@@ -10,7 +10,7 @@ import {
 } from '../domain/commands'
 import { createEmptyDocument, findNode, findOpening, findWall } from '../domain/operations'
 import { findRoom, roomExclusiveWalls } from '../domain/rooms'
-import type { SceneDocument } from '../domain/types'
+import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 import type { Selection } from '../tools/types'
 import { documentDb } from '../persistence/documentDb'
 import { History } from './history'
@@ -31,6 +31,17 @@ export const useEditorStore = defineStore('editor', () => {
   const saveState = ref<SaveState>('saved')
 
   const selection = ref<Selection | null>(null)
+
+  // Render-only node overrides for a pending numeric edit (the face-length
+  // editor while typing, inspector fields later). Not part of the document —
+  // nothing here persists or lands in history; the canvas merges it into its
+  // overlay exactly like a drag preview. shallowRef: assign a fresh object
+  // (or null) to update.
+  const previewMoves = shallowRef<Record<NodeId, Vec2> | null>(null)
+
+  function setPreviewMoves(moves: Record<NodeId, Vec2> | null) {
+    previewMoves.value = moves
+  }
 
   const history = new History()
   const canUndo = ref(false)
@@ -178,6 +189,8 @@ export const useEditorStore = defineStore('editor', () => {
     doc,
     revision,
     selection,
+    previewMoves,
+    setPreviewMoves,
     loadFailed,
     saveState,
     canUndo,

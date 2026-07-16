@@ -73,6 +73,76 @@ const faceEdit = ref<{
 } | null>(null)
 const faceInput = useTemplateRef<HTMLInputElement>('faceInput')
 const overFaceLabel = ref(false)
+/** arrow button under the cursor: while hovered, the preview assumes its direction */
+const hoverEnd = ref<'a' | 'b' | null>(null)
+/** the typed value cannot be applied (unparsable, or the stretch would collapse a wall) */
+const faceEditInvalid = ref(false)
+
+/** The typed face length, clamped exactly as commit will clamp it; null when unparsable. */
+function typedFaceLength(): number | null {
+  const raw = faceInput.value?.value.trim() ?? ''
+  // Number('') === 0, so an emptied field must be treated as invalid, not as 0
+  const parsed = raw === '' ? NaN : Math.round(Number(raw))
+  if (!Number.isFinite(parsed)) return null
+  return Math.min(FACE_LIMIT.max, Math.max(FACE_LIMIT.min, parsed))
+}
+
+/**
+ * The direction the preview (and Enter) may assume without the user pointing:
+ * the hovered arrow, else the only enabled end. Two live choices → null; we
+ * never guess which way a wall will stretch.
+ */
+function effectiveEnd(): 'a' | 'b' | null {
+  if (hoverEnd.value) return hoverEnd.value
+  const enabled = faceEdit.value?.ends.filter((option) => option.enabled) ?? []
+  return enabled.length === 1 ? enabled[0]!.end : null
+}
+
+// Reflects the typed length on a render-only overlay through the SAME moves the
+// commit will apply — the preview cannot diverge from the result. The document
+// stays untouched; invalid or refused values show a danger border instead.
+function refreshFacePreview() {
+  const edit = faceEdit.value
+  if (!edit || !editor.doc) return
+  faceEditInvalid.value = false
+  const next = typedFaceLength()
+  if (next === null) {
+    faceEditInvalid.value = true
+    return editor.setPreviewMoves(null)
+  }
+  const end = effectiveEnd()
+  if (!end) return editor.setPreviewMoves(null) // direction not chosen yet
+  const wall = findWall(editor.doc, edit.wallId)
+  const faces = wall && selectedWallFaces()
+  if (!wall || !faces) return editor.setPreviewMoves(null)
+  const face = edit.side === 'left' ? faces.left : faces.right
+  const delta = next - Math.hypot(face[1].x - face[0].x, face[1].y - face[0].y)
+  if (Math.abs(delta) < 0.005) return editor.setPreviewMoves(null)
+  const moves = stretchWallMoves(editor.doc, wall, end, delta)
+  const targets = moves && Object.fromEntries(moves.map((move) => [move.nodeId, move.to]))
+  if (!targets || collapsesAWall(editor.doc, targets)) {
+    faceEditInvalid.value = true
+    return editor.setPreviewMoves(null)
+  }
+  editor.setPreviewMoves(targets)
+}
+
+function clearFacePreview() {
+  hoverEnd.value = null
+  faceEditInvalid.value = false
+  editor.setPreviewMoves(null)
+}
+
+function onArrowEnter(option: FaceEditEnd) {
+  if (!option.enabled) return
+  hoverEnd.value = option.end
+  refreshFacePreview()
+}
+
+function onArrowLeave() {
+  hoverEnd.value = null
+  refreshFacePreview()
+}
 
 function faceEditEnds(wall: Wall): [FaceEditEnd, FaceEditEnd] {
   const a = editor.doc!.nodes[wall.a]!.pos
@@ -94,17 +164,13 @@ function faceEditEnds(wall: Wall): [FaceEditEnd, FaceEditEnd] {
 // out at exactly the typed number — no solve, one undo step.
 function commitFaceEdit(end: 'a' | 'b') {
   const edit = faceEdit.value
-  const input = faceInput.value
-  if (!edit || !input || !editor.doc) return
+  if (!edit || !editor.doc) return
   const wall = findWall(editor.doc, edit.wallId)
   if (!wall) return closeFaceEdit()
-  const raw = input.value.trim()
-  // Number('') === 0, so an emptied field must be treated as invalid, not as 0
-  const parsed = raw === '' ? NaN : Math.round(Number(raw))
-  if (!Number.isFinite(parsed)) return closeFaceEdit()
-  const next = Math.min(FACE_LIMIT.max, Math.max(FACE_LIMIT.min, parsed))
+  const next = typedFaceLength()
+  if (next === null) return closeFaceEdit()
 
-  const faces = computeWallGeometry(editor.doc).faces.get(wall.id)
+  const faces = selectedWallFaces()
   if (!faces) return closeFaceEdit()
   const face = edit.side === 'left' ? faces.left : faces.right
   // delta from the EXACT face length, so the result is the typed value even
@@ -165,6 +231,7 @@ function openFaceEdit(hit: FaceLabelHit) {
 
 function closeFaceEdit() {
   faceEdit.value = null
+  clearFacePreview()
 }
 
 // the label the editor sits on moves or vanishes with these — close, don't chase
@@ -200,8 +267,10 @@ function requestRepaint() {
     frameId = undefined
     const ctx = canvas.value?.getContext('2d')
     if (!ctx || !editor.doc) return
+    // a pending numeric edit (store preview) outranks the tool's own preview;
+    // they never coexist — the face editor only lives in idle select mode
     render(ctx, viewport, editor.doc, palette, dpr, {
-      overlay: currentTool()?.preview,
+      overlay: editor.previewMoves ? { movedNodes: editor.previewMoves } : currentTool()?.preview,
       selection: editor.selection,
     })
   })
@@ -371,6 +440,7 @@ function onKeyUp(event: KeyboardEvent) {
 // the document is non-reactive; the store bumps `revision` on every change
 watch(() => editor.revision, requestRepaint)
 watch(() => editor.selection, requestRepaint)
+watch(() => editor.previewMoves, requestRepaint)
 
 // switching tools (incl. Esc -> select) ends any in-progress interaction
 watch(
@@ -446,6 +516,8 @@ onBeforeUnmount(() => {
         "
         :aria-label="`Apply toward ${option.arrow}`"
         @pointerdown.prevent
+        @pointerenter="onArrowEnter(option)"
+        @pointerleave="onArrowLeave"
         @click="commitFaceEdit(option.end)"
       >
         {{ option.arrow }}
@@ -454,8 +526,10 @@ onBeforeUnmount(() => {
         ref="faceInput"
         type="number"
         :value="faceEdit.value"
-        class="order-2 h-7 w-20 rounded-md border border-border bg-surface px-2 text-center text-sm text-text shadow-sm focus-visible:outline-2 focus-visible:outline-primary"
+        class="order-2 h-7 w-20 rounded-md border bg-surface px-2 text-center text-sm text-text shadow-sm focus-visible:outline-2 focus-visible:outline-primary"
+        :class="faceEditInvalid ? 'border-danger' : 'border-border'"
         aria-label="Face length, cm"
+        @input="refreshFacePreview"
         @blur="closeFaceEdit"
         @keydown.escape.stop="closeFaceEdit"
         @keydown.enter.prevent="onFaceEditEnter"
