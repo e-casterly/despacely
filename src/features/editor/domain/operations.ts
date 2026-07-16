@@ -93,6 +93,47 @@ export function findWall(doc: SceneDocument, id: string): Wall | undefined {
   return doc.walls.find((wall) => wall.id === id)
 }
 
+/**
+ * The node moves that stretch a wall by `delta` cm at the given end (outward
+ * positive), keeping every junction angle intact — so the wall's mitred face
+ * lengths change by exactly `delta`, linearly, with no solve:
+ *
+ * - a free end slides its own node along the axis (its cap is a square butt);
+ * - a two-wall corner translates the neighbouring wall whole — its far node
+ *   follows the shared one, no direction changes, so the seam slides with it.
+ *
+ * Undefined at a junction of three or more walls: no single neighbour owns the
+ * seam there, and moving one would kink the others — the edit has no
+ * unambiguous linear form, so the caller should refuse it instead.
+ */
+export function stretchWallMoves(
+  doc: SceneDocument,
+  wall: Wall,
+  end: 'a' | 'b',
+  delta: number,
+): { nodeId: NodeId; from: Vec2; to: Vec2 }[] | undefined {
+  const nodeId = wall[end]
+  const pos = doc.nodes[nodeId]?.pos
+  const otherPos = doc.nodes[end === 'a' ? wall.b : wall.a]?.pos
+  if (!pos || !otherPos) return undefined
+  const len = Math.hypot(pos.x - otherPos.x, pos.y - otherPos.y)
+  if (len === 0) return undefined
+  const shift = {
+    x: ((pos.x - otherPos.x) / len) * delta,
+    y: ((pos.y - otherPos.y) / len) * delta,
+  }
+  const move = (id: NodeId) => {
+    const from = doc.nodes[id]!.pos
+    return { nodeId: id, from: { ...from }, to: { x: from.x + shift.x, y: from.y + shift.y } }
+  }
+
+  const junction = wallsAtNode(doc, nodeId).filter((other) => other.id !== wall.id)
+  if (junction.length === 0) return [move(nodeId)]
+  if (junction.length > 1) return undefined
+  const neighbour = junction[0]!
+  return [move(nodeId), move(neighbour.a === nodeId ? neighbour.b : neighbour.a)]
+}
+
 /** cm: a point within this of a wall's body counts as lying on it (a mid-wall point). */
 export const ON_WALL_TOL = 0.001
 

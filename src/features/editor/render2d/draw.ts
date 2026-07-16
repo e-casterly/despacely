@@ -375,6 +375,86 @@ function displayLength(seg: readonly [Vec2, Vec2]): number {
   return Math.round(Math.hypot(seg[1].x - seg[0].x, seg[1].y - seg[0].y) * 10) / 10
 }
 
+/** One face label of a selected wall. Exported for tests. */
+export interface FaceLabel {
+  side: 'left' | 'right'
+  /** the mitered face, oriented so its (-dy, dx) normal points away from the wall body */
+  seg: readonly [Vec2, Vec2]
+  /** the number the label shows (cm, inspector rounding) */
+  value: number
+}
+
+/**
+ * The selected wall's face labels after dedup: the right one earns its place
+ * only by reading differently — on a free-standing wall (or a symmetric
+ * junction) it would repeat the left. One source for the renderer and the
+ * label hit-test, so a label is clickable exactly where it is drawn.
+ */
+export function wallFaceLabels(faces: WallFaces): FaceLabel[] {
+  const left = displayLength(faces.left)
+  const labels: FaceLabel[] = [{ side: 'left', seg: [faces.left[0]!, faces.left[1]!], value: left }]
+  const right = displayLength(faces.right)
+  if (right !== left) {
+    labels.push({ side: 'right', seg: [faces.right[1]!, faces.right[0]!], value: right })
+  }
+  return labels
+}
+
+/** Extra clickable halo around a face label (screen px). */
+const FACE_LABEL_PAD_PX = 4
+
+/** A face label under the pointer — the entry point of on-canvas dimension editing. */
+export interface FaceLabelHit {
+  side: 'left' | 'right'
+  /** the number the label shows (cm) */
+  value: number
+  /** world position of the label's centre, where an editing overlay belongs */
+  center: Vec2
+}
+
+/**
+ * The face label of a selected wall under a world point, honouring the same
+ * visibility rules the renderer applies (dedup and the must-fit cutoff) — a
+ * label can be clicked exactly when it can be seen. Needs the ctx only to
+ * measure text in the label font.
+ */
+export function faceLabelAt(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  faces: WallFaces,
+  point: Vec2,
+): FaceLabelHit | undefined {
+  ctx.save()
+  ctx.font = `${WALL_LENGTH_FONT_PX / vp.zoom}px ${ROOM_LABEL_FONT}`
+  try {
+    for (const label of wallFaceLabels(faces)) {
+      const [a, b] = label.seg
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const len = Math.hypot(dx, dy)
+      if (len === 0) continue
+      const textWidth = ctx.measureText(`${label.value} cm`).width
+      if (textWidth > len * 0.9) continue // hidden by the fit rule → not clickable
+      const offset = (WALL_LENGTH_GAP_PX + WALL_LENGTH_FONT_PX / 2) / vp.zoom
+      const center = {
+        x: (a.x + b.x) / 2 - (dy / len) * offset,
+        y: (a.y + b.y) / 2 + (dx / len) * offset,
+      }
+      // the point in the label's own frame: u along the text, v across it
+      const u = ((point.x - center.x) * dx + (point.y - center.y) * dy) / len
+      const v = ((point.x - center.x) * -dy + (point.y - center.y) * dx) / len
+      const pad = FACE_LABEL_PAD_PX / vp.zoom
+      const halfHeight = WALL_LENGTH_FONT_PX / vp.zoom / 2
+      if (Math.abs(u) <= textWidth / 2 + pad && Math.abs(v) <= halfHeight + pad) {
+        return { side: label.side, value: label.value, center }
+      }
+    }
+  } finally {
+    ctx.restore()
+  }
+  return undefined
+}
+
 /** A measured segment to label with its length. */
 interface LengthSegment {
   a: Vec2
@@ -414,11 +494,8 @@ function lengthLabelSegments(
   if (selection?.kind === 'wall') {
     const face = faces.get(selection.id)
     if (face) {
-      segments.push({ a: face.left[0], b: face.left[1], clearance: 0, mustFit: true })
-      // the right label earns its place only by reading differently — on a
-      // freestanding wall (or a symmetric junction) it would repeat the left
-      if (displayLength(face.right) !== displayLength(face.left)) {
-        segments.push({ a: face.right[1], b: face.right[0], clearance: 0, mustFit: true })
+      for (const label of wallFaceLabels(face)) {
+        segments.push({ a: label.seg[0], b: label.seg[1], clearance: 0, mustFit: true })
       }
     }
   }

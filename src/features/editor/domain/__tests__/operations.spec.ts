@@ -18,6 +18,7 @@ import {
   removeItem,
   removeWall,
   splitWallAt,
+  stretchWallMoves,
   wallAtPoint,
   wallSegment,
   wallsAtNode,
@@ -456,5 +457,54 @@ describe('wallUnderPoint', () => {
     addWall(doc, addNode(doc, { x: 0, y: 0 }), addNode(doc, { x: 100, y: 0 }))
 
     expect(wallUnderPoint(doc, { x: 50, y: 500 }, 5)).toBeUndefined()
+  })
+})
+
+describe('stretchWallMoves', () => {
+  it('slides only its own node at a free end', () => {
+    const doc = createEmptyDocument()
+    const wall = addWallBetween(doc, { x: 0, y: 0 }, { x: 200, y: 0 }, { snapDist: 1 })!
+
+    const moves = stretchWallMoves(doc, wall, 'b', 50)!
+
+    expect(moves).toHaveLength(1)
+    expect(moves[0]!.nodeId).toBe(wall.b)
+    expect(moves[0]!.to).toEqual({ x: 250, y: 0 })
+  })
+
+  it('negative delta pulls the end inward', () => {
+    const doc = createEmptyDocument()
+    const wall = addWallBetween(doc, { x: 0, y: 0 }, { x: 200, y: 0 }, { snapDist: 1 })!
+
+    const moves = stretchWallMoves(doc, wall, 'a', -40)!
+
+    expect(moves).toHaveLength(1)
+    // outward at end a points along b→a (-x), so shrinking moves a toward +x
+    expect(moves[0]!.to).toEqual({ x: 40, y: 0 })
+  })
+
+  it('translates the neighbouring wall whole at a two-wall corner', () => {
+    const doc = createEmptyDocument()
+    const wall = addWallBetween(doc, { x: 0, y: 0 }, { x: 200, y: 0 }, { snapDist: 1 })!
+    addWallBetween(doc, { x: 200, y: 0 }, { x: 200, y: 150 }, { snapDist: 1 })!
+
+    const moves = stretchWallMoves(doc, wall, 'b', 60)!
+
+    expect(moves).toHaveLength(2)
+    const byId = new Map(moves.map((m) => [m.nodeId, m.to]))
+    expect(byId.get(wall.b)).toEqual({ x: 260, y: 0 }) // shared corner slides out
+    // the neighbour's far node follows: the wall translates, its angle survives
+    expect([...byId.values()]).toContainEqual({ x: 260, y: 150 })
+  })
+
+  it('refuses a junction of three or more walls', () => {
+    const doc = createEmptyDocument()
+    const wall = addWallBetween(doc, { x: 0, y: 0 }, { x: 200, y: 0 }, { snapDist: 1 })!
+    addWallBetween(doc, { x: 200, y: 0 }, { x: 200, y: 150 }, { snapDist: 1 })!
+    addWallBetween(doc, { x: 200, y: 0 }, { x: 200, y: -150 }, { snapDist: 1 })!
+
+    expect(stretchWallMoves(doc, wall, 'b', 60)).toBeUndefined()
+    // the other end is still free and editable
+    expect(stretchWallMoves(doc, wall, 'a', 60)).toHaveLength(1)
   })
 })
