@@ -370,6 +370,11 @@ const WALL_LENGTH_FONT_PX = 11
 /** Screen gap between the wall face and its length label. */
 const WALL_LENGTH_GAP_PX = 6
 
+/** The number a length label displays (cm, same rounding as the inspector). */
+function displayLength(seg: readonly [Vec2, Vec2]): number {
+  return Math.round(Math.hypot(seg[1].x - seg[0].x, seg[1].y - seg[0].y) * 10) / 10
+}
+
 /** A measured segment to label with its length. */
 interface LengthSegment {
   a: Vec2
@@ -384,9 +389,10 @@ interface LengthSegment {
  * Length labels appear only in interactive contexts, and all but the ghost
  * measure mitered faces, not axes: the ghost shows its axis (joints are not
  * final until commit, and snapping works on axes), the selected wall shows
- * both faces — each labelled on its own side — and the selected room shows
- * the room-facing face of every contour wall. Segments are ordered so their
- * (-dy, dx) normal points away from the wall body.
+ * both faces — each labelled on its own side, collapsed to one label when
+ * both would read the same (a free-standing wall, a symmetric junction) —
+ * and the selected room shows the room-facing face of every contour wall.
+ * Segments are ordered so their (-dy, dx) normal points away from the wall body.
  */
 function lengthLabelSegments(
   doc: SceneDocument,
@@ -409,7 +415,11 @@ function lengthLabelSegments(
     const face = faces.get(selection.id)
     if (face) {
       segments.push({ a: face.left[0], b: face.left[1], clearance: 0, mustFit: true })
-      segments.push({ a: face.right[1], b: face.right[0], clearance: 0, mustFit: true })
+      // the right label earns its place only by reading differently — on a
+      // freestanding wall (or a symmetric junction) it would repeat the left
+      if (displayLength(face.right) !== displayLength(face.left)) {
+        segments.push({ a: face.right[1], b: face.right[0], clearance: 0, mustFit: true })
+      }
     }
   }
   if (selection?.kind === 'room') {
@@ -455,7 +465,7 @@ function drawWallLengths(
     const dy = seg.b.y - seg.a.y
     const len = Math.hypot(dx, dy)
     if (len === 0) continue
-    const text = `${Math.round(len * 10) / 10} cm`
+    const text = `${displayLength([seg.a, seg.b])} cm`
     if (seg.mustFit && ctx.measureText(text).width > len * 0.9) continue
     const offset = seg.clearance + (WALL_LENGTH_GAP_PX + WALL_LENGTH_FONT_PX / 2) / vp.zoom
     const x = (seg.a.x + seg.b.x) / 2 - (dy / len) * offset
