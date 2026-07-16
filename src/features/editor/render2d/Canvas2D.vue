@@ -72,7 +72,14 @@ const faceEdit = ref<{
   ends: [FaceEditEnd, FaceEditEnd]
 } | null>(null)
 const faceInput = useTemplateRef<HTMLInputElement>('faceInput')
-const overFaceLabel = ref(false)
+/** face label under the pointer; drives the chip's hover tint and the cursor */
+const hoveredFaceLabel = ref<'left' | 'right' | null>(null)
+
+function setHoveredFaceLabel(side: 'left' | 'right' | null) {
+  if (side === hoveredFaceLabel.value) return
+  hoveredFaceLabel.value = side
+  requestRepaint() // the chip answers the pointer, so the canvas must follow
+}
 /** arrow button under the cursor: while hovered, the preview assumes its direction */
 const hoverEnd = ref<'a' | 'b' | null>(null)
 /** the typed value cannot be applied (unparsable, or the stretch would collapse a wall) */
@@ -272,6 +279,7 @@ function requestRepaint() {
     render(ctx, viewport, editor.doc, palette, dpr, {
       overlay: editor.previewMoves ? { movedNodes: editor.previewMoves } : currentTool()?.preview,
       selection: editor.selection,
+      hoveredFaceLabel: hoveredFaceLabel.value,
     })
   })
 }
@@ -346,7 +354,7 @@ function onPointerMove(event: PointerEvent) {
     requestRepaint()
     return
   }
-  overFaceLabel.value = faceLabelUnder(event) !== undefined
+  setHoveredFaceLabel(faceLabelUnder(event)?.side ?? null)
   const tool = currentTool()
   if (tool?.onPointerMove) {
     const hadPreview = tool.preview !== null
@@ -370,6 +378,7 @@ function onPointerUp(event: PointerEvent) {
 }
 
 function onPointerLeave() {
+  setHoveredFaceLabel(null)
   // drop any hover-only preview (e.g. the door/window ghost) as the cursor exits
   const tool = currentTool()
   if (tool?.onPointerLeave) {
@@ -482,7 +491,7 @@ onBeforeUnmount(() => {
           ? 'cursor-grabbing'
           : spaceHeld
             ? 'cursor-grab'
-            : overFaceLabel
+            : hoveredFaceLabel
               ? 'cursor-pointer'
               : activeTool === 'select'
                 ? ''

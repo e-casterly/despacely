@@ -29,6 +29,8 @@ const MIN_LINE_GAP_PX = 6
 export interface RenderView {
   overlay?: ToolOverlay | null
   selection?: Selection | null
+  /** which of the selected wall's face labels the pointer is over */
+  hoveredFaceLabel?: 'left' | 'right' | null
 }
 
 /** Full repaint: background, grid, then the document in layer order. */
@@ -400,7 +402,8 @@ export function wallFaceLabels(faces: WallFaces): FaceLabel[] {
   return labels
 }
 
-/** Extra clickable halo around a face label (screen px). */
+/** Clickable halo around a face label (screen px) — and the padding of the pill
+ * drawn behind it, so the chip shows exactly the area a click will hit. */
 const FACE_LABEL_PAD_PX = 4
 
 /** A face label under the pointer — the entry point of on-canvas dimension editing. */
@@ -463,7 +466,14 @@ interface LengthSegment {
   clearance: number
   /** hide the label when it is wider than the wall; the ghost always shows */
   mustFit: boolean
+  /** draw as a pill — marks the label as clickable (a selected wall's dimensions) */
+  chip?: boolean
+  /** the pointer is over this chip: tint it so the click target answers back */
+  hover?: boolean
 }
+
+/** Accent wash inside a hovered chip — the same idiom as the selection washes. */
+const FACE_LABEL_HOVER_ALPHA = 0.12
 
 /**
  * Length labels appear only in interactive contexts, and all but the ghost
@@ -495,7 +505,15 @@ function lengthLabelSegments(
     const face = faces.get(selection.id)
     if (face) {
       for (const label of wallFaceLabels(face)) {
-        segments.push({ a: label.seg[0], b: label.seg[1], clearance: 0, mustFit: true })
+        // chip: these labels open the on-canvas editor, and should look like it
+        segments.push({
+          a: label.seg[0],
+          b: label.seg[1],
+          clearance: 0,
+          mustFit: true,
+          chip: true,
+          hover: label.side === view.hoveredFaceLabel,
+        })
       }
     }
   }
@@ -543,13 +561,40 @@ function drawWallLengths(
     const len = Math.hypot(dx, dy)
     if (len === 0) continue
     const text = `${displayLength([seg.a, seg.b])} cm`
-    if (seg.mustFit && ctx.measureText(text).width > len * 0.9) continue
+    const textWidth = ctx.measureText(text).width
+    if (seg.mustFit && textWidth > len * 0.9) continue
     const offset = seg.clearance + (WALL_LENGTH_GAP_PX + WALL_LENGTH_FONT_PX / 2) / vp.zoom
     const x = (seg.a.x + seg.b.x) / 2 - (dy / len) * offset
     const y = (seg.a.y + seg.b.y) / 2 + (dx / len) * offset
     ctx.save()
     ctx.translate(x, y)
     ctx.rotate(uprightAngle(dx, dy))
+    if (seg.chip) {
+      // a pill behind an editable dimension marks it as clickable; its bounds
+      // are the label's hit area, so the affordance never lies about the target
+      const pad = FACE_LABEL_PAD_PX / vp.zoom
+      ctx.beginPath()
+      ctx.roundRect(
+        -textWidth / 2 - pad,
+        -fontSize / 2 - pad,
+        textWidth + pad * 2,
+        fontSize + pad * 2,
+        (FACE_LABEL_PAD_PX + 2) / vp.zoom,
+      )
+      ctx.fillStyle = palette.background
+      ctx.fill()
+      if (seg.hover) {
+        // answer the pointer: a light accent wash and a firmer border
+        ctx.globalAlpha = FACE_LABEL_HOVER_ALPHA
+        ctx.fillStyle = palette.accent
+        ctx.fill()
+        ctx.globalAlpha = 1
+      }
+      ctx.strokeStyle = palette.accent
+      ctx.lineWidth = (seg.hover ? 1.5 : 1) / vp.zoom
+      ctx.stroke()
+      ctx.fillStyle = palette.accent
+    }
     ctx.fillText(text, 0, 0)
     ctx.restore()
   }
