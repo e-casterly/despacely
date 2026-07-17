@@ -4,11 +4,21 @@ import { useEditorStore } from '../store/editorStore'
 import { faceLabelAt, render, type FaceLabelHit } from './draw'
 import { readPalette, type EditorPalette } from '../palette'
 import { createViewport, panBy, screenToWorld, worldToScreen, zoomAt, zoomToFit } from './viewport'
-import { collapsesAnEdge, docBounds, findWall, stretchWallMoves } from '../domain/operations'
+import {
+  collapsesAnEdge,
+  dividerUnderPoint,
+  docBounds,
+  findWall,
+  nodeAt,
+  stretchWallMoves,
+  wallUnderPoint,
+} from '../domain/operations'
+import { openingAtPoint } from '../domain/openings'
+import { roomAt, roomKey } from '../domain/rooms'
 import { MoveNodesCommand } from '../domain/commands'
 import { computeWallGeometry, type WallFaces } from '../domain/wallJoints'
 import type { Vec2, Wall } from '../domain/types'
-import type { PointerInput, Tool, ToolContext, ToolId } from '../tools/types'
+import type { PointerInput, Selection, Tool, ToolContext, ToolId } from '../tools/types'
 import { createWallTool } from '../tools/wallTool'
 import { createRoomTool } from '../tools/roomTool'
 import { createOpeningTool } from '../tools/openingTool'
@@ -249,6 +259,39 @@ watch(() => editor.revision, closeFaceEdit)
 
 /** pointer pick/snap radius: ~10 screen px expressed in world cm */
 const SNAP_PX = 10
+
+// --- element hover (select mode): the node or wall under an idle pointer ---
+// A pre-selection cue; the renderer washes the wall / rings the vertex lightly.
+const hovered = ref<Selection | null>(null)
+
+function sameHover(a: Selection | null, b: Selection | null): boolean {
+  return a?.kind === b?.kind && a?.id === b?.id
+}
+
+/** The element under a world point in select mode, in the same pick priority a
+ *  click uses: vertex → opening → wall → divider → room. */
+function hoverAt(world: Vec2): Selection | null {
+  if (activeTool !== 'select' || !editor.doc) return null
+  const tol = SNAP_PX / viewport.zoom
+  const node = nodeAt(editor.doc, world, tol)
+  if (node) return { kind: 'node', id: node.id }
+  const opening = openingAtPoint(editor.doc, world)
+  if (opening) return { kind: 'opening', id: opening.opening.id }
+  const wall = wallUnderPoint(editor.doc, world, tol)
+  if (wall) return { kind: 'wall', id: wall.id }
+  const divider = dividerUnderPoint(editor.doc, world, tol)
+  if (divider) return { kind: 'divider', id: divider.id }
+  const room = roomAt(editor.doc, world)
+  if (room) return { kind: 'room', id: roomKey(room) }
+  return null
+}
+
+function setHovered(next: Selection | null) {
+  if (sameHover(next, hovered.value)) return
+  hovered.value = next
+  requestRepaint()
+}
+
 function toolContext(): ToolContext {
   return {
     doc: editor.doc!,
@@ -281,6 +324,7 @@ function requestRepaint() {
     render(ctx, viewport, editor.doc, palette, dpr, {
       overlay: editor.previewMoves ? { movedNodes: editor.previewMoves } : currentTool()?.preview,
       selection: editor.selection,
+      hovered: hovered.value,
       hoveredFaceLabel: hoveredFaceLabel.value,
     })
   })
@@ -339,6 +383,7 @@ function onPointerDown(event: PointerEvent) {
     return
   }
   closeFaceEdit()
+  setHovered(null) // a press starts a drag/selection; the hover cue washes out
   const tool = currentTool()
   if (tool?.onPointerDown) {
     // capture so drags keep receiving move/up outside the canvas
@@ -357,6 +402,8 @@ function onPointerMove(event: PointerEvent) {
     return
   }
   setHoveredFaceLabel(faceLabelUnder(event)?.side ?? null)
+  // element hover only while idle (no button held) — a press starts a drag
+  setHovered(event.buttons === 0 ? hoverAt(screenToWorld(viewport, pointerPosition(event))) : null)
   const tool = currentTool()
   if (tool?.onPointerMove) {
     const hadPreview = tool.preview !== null
@@ -381,6 +428,7 @@ function onPointerUp(event: PointerEvent) {
 
 function onPointerLeave() {
   setHoveredFaceLabel(null)
+  setHovered(null)
   // drop any hover-only preview (e.g. the door/window ghost) as the cursor exits
   const tool = currentTool()
   if (tool?.onPointerLeave) {
@@ -460,6 +508,7 @@ watch(
     if (prev) tools[prev]?.cancel?.()
     // leaving select mode drops the highlight so it doesn't linger while drawing
     if (next !== 'select') editor.select(null)
+    setHovered(null) // the hover cue belongs to select mode only
     syncTextEntry()
     requestRepaint()
   },
@@ -493,7 +542,7 @@ onBeforeUnmount(() => {
           ? 'cursor-grabbing'
           : spaceHeld
             ? 'cursor-grab'
-            : hoveredFaceLabel
+            : hoveredFaceLabel || hovered
               ? 'cursor-pointer'
               : activeTool === 'select'
                 ? ''

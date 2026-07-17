@@ -29,6 +29,8 @@ const MIN_LINE_GAP_PX = 6
 export interface RenderView {
   overlay?: ToolOverlay | null
   selection?: Selection | null
+  /** the node or wall the pointer is hovering in select mode, highlighted lightly */
+  hovered?: Selection | null
   /** which of the selected wall's face labels the pointer is over */
   hoveredFaceLabel?: 'left' | 'right' | null
 }
@@ -52,6 +54,12 @@ export function render(
   const selectedNodeId = view.selection?.kind === 'node' ? view.selection.id : null
   const selectedRoomKey = view.selection?.kind === 'room' ? view.selection.id : null
   const selectedOpeningId = view.selection?.kind === 'opening' ? view.selection.id : null
+  const hoveredWallId = view.hovered?.kind === 'wall' ? view.hovered.id : null
+  const hoveredNodeId = view.hovered?.kind === 'node' ? view.hovered.id : null
+  const hoveredRoomKey = view.hovered?.kind === 'room' ? view.hovered.id : null
+  const hoveredOpeningId = view.hovered?.kind === 'opening' ? view.hovered.id : null
+  const hoveredDividerId = view.hovered?.kind === 'divider' ? view.hovered.id : null
+  const selectedDividerId = view.selection?.kind === 'divider' ? view.selection.id : null
   // The doc as the user currently sees it: a drag preview overrides node
   // positions on a render-only copy, so the real document stays untouched
   // until the move is committed as a command.
@@ -77,22 +85,36 @@ export function render(
   // downstream agree on which openings currently fit
   const openings = fittingOpenings(ghost?.doc ?? viewDoc, geometry)
   withWorldTransform(ctx, vp, dpr, () => {
-    drawRooms(ctx, rooms, palette, selectedRoomKey)
+    drawRooms(ctx, rooms, palette, selectedRoomKey, hoveredRoomKey)
     drawWalls(
       ctx,
+      vp,
       ghost?.doc ?? viewDoc,
       geometry,
       openings,
       palette,
       selectedWallId,
+      hoveredWallId,
       ghost?.ghostIds ?? null,
     )
-    drawOpenings(ctx, vp, ghost?.doc ?? viewDoc, openings, rooms, palette, selectedOpeningId)
+    drawOpenings(
+      ctx,
+      vp,
+      ghost?.doc ?? viewDoc,
+      openings,
+      rooms,
+      palette,
+      selectedOpeningId,
+      hoveredOpeningId,
+    )
     if (view.overlay?.ghostOpening) {
       drawGhostOpening(ctx, vp, view.overlay.ghostOpening, palette)
     }
-    drawDividers(ctx, vp, ghost?.doc ?? viewDoc, palette, view.overlay?.ghostDivider)
-    drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
+    drawDividers(ctx, vp, ghost?.doc ?? viewDoc, palette, view.overlay?.ghostDivider, {
+      selectedId: selectedDividerId,
+      hoveredId: hoveredDividerId,
+    })
+    drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId, hoveredNodeId)
     if (view.overlay?.previewNodes?.length) {
       drawPreviewNodes(ctx, vp, view.overlay.previewNodes, palette)
     }
@@ -295,6 +317,8 @@ function withWorldTransform(
 
 /** Selected-room fill: accent at low alpha, echoing the ghost wall's translucent accent. */
 const SELECTED_ROOM_ALPHA = 0.25
+/** Hovered-room wash: lighter than the selected fill, so hover reads as pre-selection. */
+const ROOM_HOVER_ALPHA = 0.18
 
 /**
  * Fills every closed wall contour, largest first so a loop nested inside a
@@ -307,10 +331,17 @@ function drawRooms(
   rooms: Room[],
   palette: EditorPalette,
   selectedKey: string | null,
+  hoveredKey: string | null,
 ): void {
   for (const room of rooms) {
-    if (selectedKey !== null && roomKey(room) === selectedKey) {
+    const key = roomKey(room)
+    if (selectedKey !== null && key === selectedKey) {
       ctx.globalAlpha = SELECTED_ROOM_ALPHA
+      ctx.fillStyle = palette.accent
+      fillRoomShape(ctx, room)
+      ctx.globalAlpha = 1
+    } else if (hoveredKey !== null && key === hoveredKey) {
+      ctx.globalAlpha = ROOM_HOVER_ALPHA
       ctx.fillStyle = palette.accent
       fillRoomShape(ctx, room)
       ctx.globalAlpha = 1
@@ -658,6 +689,11 @@ function drawRoomDraft(
   ctx.fillText(`${w} × ${h} cm`, c.x + (c.x >= a.x ? gap : -gap), c.y + (c.y >= a.y ? gap : -gap))
 }
 
+/** Accent wash over a hovered (but unselected) wall — the pre-selection cue. */
+const WALL_HOVER_ALPHA = 0.3
+/** Accent outline (screen px) around a hovered wall, so the cue stays obvious. */
+const WALL_HOVER_OUTLINE_PX = 1.5
+
 /**
  * Each wall is one filled polygon, mitered at shared nodes so neighbours tile
  * without overlap or notch; too-sharp corners get a flat bevel (see wallJoints).
@@ -666,11 +702,13 @@ function drawRoomDraft(
  */
 function drawWalls(
   ctx: CanvasRenderingContext2D,
+  vp: Viewport,
   doc: SceneDocument,
   geometry: WallGeometry,
   openings: Map<string, FittedOpening[]>,
   palette: EditorPalette,
   selectedWallId: string | null,
+  hoveredWallId: string | null,
   ghostIds: Set<string> | null,
 ): void {
   const { polygons } = geometry
@@ -691,6 +729,25 @@ function drawWalls(
       continue
     }
     fillWallShape(ctx, poly, holesOf(wall))
+  }
+  // a hovered but unselected wall gets an accent wash plus an accent outline over
+  // its grey body — an obvious pre-selection cue, still short of the solid fill a
+  // selected wall carries
+  const hoverWall = doc.walls.find((wall) => wall.id === hoveredWallId)
+  if (hoverWall && !isFront(hoverWall.id)) {
+    const poly = polygons.get(hoverWall.id)
+    if (poly) {
+      const holes = holesOf(hoverWall)
+      ctx.globalAlpha = WALL_HOVER_ALPHA
+      ctx.fillStyle = palette.accent
+      fillWallShape(ctx, poly, holes)
+      ctx.globalAlpha = 1
+      ctx.strokeStyle = palette.accent
+      ctx.lineWidth = WALL_HOVER_OUTLINE_PX / vp.zoom
+      ctx.beginPath()
+      tracePoly(ctx, poly)
+      ctx.stroke()
+    }
   }
   for (const wall of front) {
     ctx.globalAlpha = isGhost(wall.id) ? 0.5 : 1
@@ -736,23 +793,31 @@ function drawDividers(
   doc: SceneDocument,
   palette: EditorPalette,
   ghost: { a: Vec2; b: Vec2 } | null | undefined,
+  active: { selectedId: string | null; hoveredId: string | null } = {
+    selectedId: null,
+    hoveredId: null,
+  },
 ): void {
   if (doc.dividers.length === 0 && !ghost) return
   ctx.save()
   ctx.lineCap = 'round'
-  ctx.lineWidth = DIVIDER_WIDTH_PX / vp.zoom
   ctx.setLineDash(DIVIDER_DASH_PX.map((d) => d / vp.zoom))
-  ctx.strokeStyle = palette.divider
   for (const divider of doc.dividers) {
     const a = doc.nodes[divider.a]?.pos
     const b = doc.nodes[divider.b]?.pos
     if (!a || !b) continue
+    // selected and hovered dividers switch to accent; a selected one is bolder
+    const selected = divider.id === active.selectedId
+    const accented = selected || divider.id === active.hoveredId
+    ctx.strokeStyle = accented ? palette.accent : palette.divider
+    ctx.lineWidth = (DIVIDER_WIDTH_PX * (selected ? 1.8 : 1)) / vp.zoom
     ctx.beginPath()
     ctx.moveTo(a.x, a.y)
     ctx.lineTo(b.x, b.y)
     ctx.stroke()
   }
   if (ghost) {
+    ctx.lineWidth = DIVIDER_WIDTH_PX / vp.zoom
     ctx.globalAlpha = GHOST_DIVIDER_ALPHA
     ctx.strokeStyle = palette.accent
     ctx.beginPath()
@@ -857,6 +922,8 @@ export function doorSwingSide(rooms: Room[], span: OpeningSpan, thickness: numbe
  * covering the very floor you cut the doorway to see through.
  */
 const SELECTED_OPENING_ALPHA = 0.25
+/** Hovered-opening wash: lighter than the selected one, so hover reads as pre-selection. */
+const OPENING_HOVER_ALPHA = 0.16
 
 /** Door and window symbols, drawn inside the gaps the walls were cut open for. */
 function drawOpenings(
@@ -867,6 +934,7 @@ function drawOpenings(
   rooms: Room[],
   palette: EditorPalette,
   selectedOpeningId: string | null,
+  hoveredOpeningId: string | null,
 ): void {
   if (openings.size === 0) return
   ctx.lineWidth = OPENING_SYMBOL_PX / vp.zoom
@@ -875,8 +943,14 @@ function drawOpenings(
   for (const wall of doc.walls) {
     for (const { opening, span } of openings.get(wall.id) ?? []) {
       const selected = opening.id === selectedOpeningId
-      if (selected) {
-        ctx.globalAlpha = SELECTED_OPENING_ALPHA
+      // a selected opening washes solid; a merely hovered one washes lighter
+      const washAlpha = selected
+        ? SELECTED_OPENING_ALPHA
+        : opening.id === hoveredOpeningId
+          ? OPENING_HOVER_ALPHA
+          : 0
+      if (washAlpha > 0) {
+        ctx.globalAlpha = washAlpha
         ctx.fillStyle = palette.accent
         ctx.beginPath()
         tracePoly(ctx, openingRect(span, wall.thickness))
@@ -973,6 +1047,8 @@ const NODE_RADIUS_PX = 4
 /** The selected vertex is drawn larger, so it reads differently from the
  * accent dots that mark the endpoints of a selected wall. */
 const SELECTED_NODE_SCALE = 1.5
+/** Radius (screen px) of the accent ring around a hovered (unselected) vertex. */
+const NODE_HOVER_RING_PX = 7
 
 /** Draws a dot at every node referenced by a wall, on top of the strokes. */
 function drawWallNodes(
@@ -982,6 +1058,7 @@ function drawWallNodes(
   palette: EditorPalette,
   selectedWallId: string | null,
   selectedNodeId: NodeId | null,
+  hoveredNodeId: NodeId | null,
 ): void {
   const radius = NODE_RADIUS_PX / vp.zoom
   // accent both endpoints of a selected wall, or the one selected node
@@ -1007,6 +1084,18 @@ function drawWallNodes(
     ctx.arc(node.pos.x, node.pos.y, r, 0, Math.PI * 2)
     ctx.fill()
     ctx.stroke()
+  }
+  // a hovered but unselected vertex gets a thin accent ring — lighter than the
+  // solid accent dot a selected vertex becomes
+  if (hoveredNodeId && hoveredNodeId !== selectedNodeId && used.has(hoveredNodeId)) {
+    const node = doc.nodes[hoveredNodeId]
+    if (node) {
+      ctx.strokeStyle = palette.accent
+      ctx.lineWidth = 1.5 / vp.zoom
+      ctx.beginPath()
+      ctx.arc(node.pos.x, node.pos.y, NODE_HOVER_RING_PX / vp.zoom, 0, Math.PI * 2)
+      ctx.stroke()
+    }
   }
 }
 
