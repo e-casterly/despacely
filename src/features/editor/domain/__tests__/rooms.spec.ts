@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, addWall, addWallBetween, createEmptyDocument, removeWall } from '../operations'
+import {
+  addDivider,
+  addNode,
+  addWall,
+  addWallBetween,
+  createEmptyDocument,
+  removeWall,
+} from '../operations'
 import { detectRooms, insideAnyRoom, roomAt, roomExclusiveWalls, roomKey, wallFaceSides } from '../rooms'
 import { computeWallGeometry } from '../wallJoints'
 import type { NodeId, SceneDocument, Vec2 } from '../types'
@@ -351,5 +358,52 @@ describe('wallFaceSides', () => {
     // a T-junction at each end trims both faces by the crossing wall's half thickness
     expect(shared.left.length).toBeCloseTo(190, 6)
     expect(shared.right.length).toBeCloseTo(190, 6)
+  })
+})
+
+describe('detectRooms with zoning dividers', () => {
+  /** A 100×100 square whose top and bottom edges carry a midpoint node at x=50. */
+  function squareWithMidpoints(doc: SceneDocument): { topMid: NodeId; bottomMid: NodeId } {
+    const c00 = addNode(doc, { x: 0, y: 0 })
+    const topMid = addNode(doc, { x: 50, y: 0 })
+    const c10 = addNode(doc, { x: 100, y: 0 })
+    const c11 = addNode(doc, { x: 100, y: 100 })
+    const bottomMid = addNode(doc, { x: 50, y: 100 })
+    const c01 = addNode(doc, { x: 0, y: 100 })
+    for (const [a, b] of [
+      [c00, topMid],
+      [topMid, c10],
+      [c10, c11],
+      [c11, bottomMid],
+      [bottomMid, c01],
+      [c01, c00],
+    ] as const) {
+      addWall(doc, a, b)
+    }
+    return { topMid, bottomMid }
+  }
+
+  it('splits a room into two zones of the right area with a chord divider', () => {
+    const doc = createEmptyDocument()
+    const { topMid, bottomMid } = squareWithMidpoints(doc)
+    expect(detectRooms(doc)).toHaveLength(1) // one open room before zoning
+
+    addDivider(doc, topMid, bottomMid)
+
+    const zones = detectRooms(doc)
+    expect(zones).toHaveLength(2)
+    expect(zones.map((z) => z.area)).toEqual([50 * 100, 50 * 100])
+  })
+
+  it('does not form a zone from a divider that dead-ends inside the room', () => {
+    const doc = createEmptyDocument()
+    const { topMid } = squareWithMidpoints(doc)
+    const loose = addNode(doc, { x: 50, y: 50 }) // free end, not on the contour
+    addDivider(doc, topMid, loose)
+
+    // the spur is pruned like a dead-end wall: still one undivided room
+    const rooms = detectRooms(doc)
+    expect(rooms).toHaveLength(1)
+    expect(rooms[0]!.area).toBe(100 * 100)
   })
 })

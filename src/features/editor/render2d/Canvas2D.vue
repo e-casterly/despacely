@@ -4,7 +4,7 @@ import { useEditorStore } from '../store/editorStore'
 import { faceLabelAt, render, type FaceLabelHit } from './draw'
 import { readPalette, type EditorPalette } from '../palette'
 import { createViewport, panBy, screenToWorld, worldToScreen, zoomAt, zoomToFit } from './viewport'
-import { collapsesAWall, docBounds, findWall, stretchWallMoves } from '../domain/operations'
+import { collapsesAnEdge, docBounds, findWall, stretchWallMoves } from '../domain/operations'
 import { MoveNodesCommand } from '../domain/commands'
 import { computeWallGeometry, type WallFaces } from '../domain/wallJoints'
 import type { Vec2, Wall } from '../domain/types'
@@ -13,6 +13,7 @@ import { createWallTool } from '../tools/wallTool'
 import { createRoomTool } from '../tools/roomTool'
 import { createOpeningTool } from '../tools/openingTool'
 import { createSelectTool } from '../tools/selectTool'
+import { createSplitTool } from '../tools/splitTool'
 
 const { activeTool } = defineProps<{ activeTool: ToolId }>()
 
@@ -33,6 +34,7 @@ const tools: Partial<Record<ToolId, Tool>> = {
   room: createRoomTool(),
   door: createOpeningTool('door'),
   window: createOpeningTool('window'),
+  split: createSplitTool(),
 }
 function currentTool(): Tool | undefined {
   return tools[activeTool]
@@ -127,7 +129,7 @@ function refreshFacePreview() {
   if (Math.abs(delta) < 0.005) return editor.setPreviewMoves(null)
   const moves = stretchWallMoves(editor.doc, wall, end, delta)
   const targets = moves && Object.fromEntries(moves.map((move) => [move.nodeId, move.to]))
-  if (!targets || collapsesAWall(editor.doc, targets)) {
+  if (!targets || collapsesAnEdge(editor.doc, targets)) {
     faceEditInvalid.value = true
     return editor.setPreviewMoves(null)
   }
@@ -189,7 +191,7 @@ function commitFaceEdit(end: 'a' | 'b') {
   if (!moves) return closeFaceEdit()
   // refuse a stretch that collapses a neighbouring wall; nothing is committed
   const targets = Object.fromEntries(moves.map((move) => [move.nodeId, move.to]))
-  if (collapsesAWall(editor.doc, targets)) return closeFaceEdit()
+  if (collapsesAnEdge(editor.doc, targets)) return closeFaceEdit()
   editor.apply(new MoveNodesCommand(moves, 'Resize wall'))
   closeFaceEdit()
 }

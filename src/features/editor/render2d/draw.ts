@@ -91,7 +91,11 @@ export function render(
     if (view.overlay?.ghostOpening) {
       drawGhostOpening(ctx, vp, view.overlay.ghostOpening, palette)
     }
+    drawDividers(ctx, vp, ghost?.doc ?? viewDoc, palette, view.overlay?.ghostDivider)
     drawWallNodes(ctx, vp, viewDoc, palette, selectedWallId, selectedNodeId)
+    if (view.overlay?.previewNodes?.length) {
+      drawPreviewNodes(ctx, vp, view.overlay.previewNodes, palette)
+    }
     drawItems(ctx, vp, viewDoc, palette)
     drawRoomLabels(ctx, vp, rooms, palette)
     if (view.overlay?.roomDraft) drawRoomDraft(ctx, vp, view.overlay.roomDraft, palette)
@@ -495,6 +499,10 @@ function lengthLabelSegments(
   if (view.overlay?.ghostWall) {
     segments.push({ ...view.overlay.ghostWall, clearance: WALL_THICKNESS / 2, mustFit: false })
   }
+  // a divider has no body, so its ruler sits right on the line (no clearance)
+  if (view.overlay?.ghostDivider) {
+    segments.push({ ...view.overlay.ghostDivider, clearance: 0, mustFit: false })
+  }
   // each edge of a room being drawn is its own live ruler, like the wall ghost
   if (view.overlay?.ghostRoom) {
     for (const edge of loopEdges(view.overlay.ghostRoom)) {
@@ -706,6 +714,54 @@ function fillWallShape(ctx: CanvasRenderingContext2D, ring: Vec2[], holes: Vec2[
   tracePoly(ctx, ring)
   for (const hole of holes) tracePoly(ctx, hole)
   ctx.fill('evenodd')
+}
+
+/** Zoning divider line: constant screen width and dash, like a guide, since it
+ *  marks a boundary rather than a wall body. */
+const DIVIDER_WIDTH_PX = 1.5
+const DIVIDER_DASH_PX = [6, 4]
+/** The divider being placed reads as a ghost: the same translucent accent the wall ghost uses. */
+const GHOST_DIVIDER_ALPHA = 0.6
+
+/**
+ * Zoning dividers: a thin dashed line along each divider's centerline, plus the
+ * one being drawn (translucent accent). Zero thickness means there is no body to
+ * fill — the line is the whole mark. Drawn over the room fills, so the boundary
+ * reads on top of the two zones it separates. Widths and dashes are divided by
+ * zoom so they stay constant on screen inside the world transform.
+ */
+function drawDividers(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  doc: SceneDocument,
+  palette: EditorPalette,
+  ghost: { a: Vec2; b: Vec2 } | null | undefined,
+): void {
+  if (doc.dividers.length === 0 && !ghost) return
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineWidth = DIVIDER_WIDTH_PX / vp.zoom
+  ctx.setLineDash(DIVIDER_DASH_PX.map((d) => d / vp.zoom))
+  ctx.strokeStyle = palette.divider
+  for (const divider of doc.dividers) {
+    const a = doc.nodes[divider.a]?.pos
+    const b = doc.nodes[divider.b]?.pos
+    if (!a || !b) continue
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+  }
+  if (ghost) {
+    ctx.globalAlpha = GHOST_DIVIDER_ALPHA
+    ctx.strokeStyle = palette.accent
+    ctx.beginPath()
+    ctx.moveTo(ghost.a.x, ghost.a.y)
+    ctx.lineTo(ghost.b.x, ghost.b.y)
+    ctx.stroke()
+    ctx.globalAlpha = 1
+  }
+  ctx.restore()
 }
 
 /** Stroke width (screen px) of the door/window symbols drawn inside the gaps. */
@@ -972,6 +1028,29 @@ function drawMergeRing(
   ctx.beginPath()
   ctx.arc(node.pos.x, node.pos.y, MERGE_RING_PX / vp.zoom, 0, Math.PI * 2)
   ctx.stroke()
+}
+
+/**
+ * Preview node dots the split tool drops where an endpoint has snapped onto a
+ * wall or vertex — accent fill with the background ring the real node dots use,
+ * so they read as "the divider will attach here" while it is being drawn.
+ */
+function drawPreviewNodes(
+  ctx: CanvasRenderingContext2D,
+  vp: Viewport,
+  points: Vec2[],
+  palette: EditorPalette,
+): void {
+  const radius = NODE_RADIUS_PX / vp.zoom
+  ctx.fillStyle = palette.accent
+  ctx.strokeStyle = palette.background
+  ctx.lineWidth = 1 / vp.zoom
+  for (const point of points) {
+    ctx.beginPath()
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+  }
 }
 
 /** Each item is drawn in its own stored colour — the palette only supplies the outline. */

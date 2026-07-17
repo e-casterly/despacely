@@ -1,6 +1,9 @@
 import {
+  addDividerBetween,
   addItem,
   addWallBetween,
+  dividersAtNode,
+  findDivider,
   findOpening,
   findWall,
   mergeNodes,
@@ -8,6 +11,7 @@ import {
   moveNode,
   nodeAt,
   ON_WALL_TOL,
+  removeDivider,
   removeItem,
   removeWall,
   splitWallAt,
@@ -17,7 +21,17 @@ import {
   type WallOptions,
 } from './operations'
 import { roomExclusiveWalls } from './rooms'
-import type { Item, Node, NodeId, Opening, SceneDocument, SwingSide, Vec2, Wall } from './types'
+import type {
+  Divider,
+  Item,
+  Node,
+  NodeId,
+  Opening,
+  SceneDocument,
+  SwingSide,
+  Vec2,
+  Wall,
+} from './types'
 
 /**
  * A reversible edit. Every document mutation goes through a command so the
@@ -136,6 +150,64 @@ export class AddRoomCommand implements Command {
   }
 }
 
+/**
+ * Adds a zero-thickness zoning divider between two points, snapping endpoints to
+ * nearby nodes. An endpoint on the body of an existing wall splits that wall into
+ * two halves at a T-junction — exactly like {@link AddWallCommand} — so the
+ * divider connects into the contour and {@link detectRooms} reads the enclosed
+ * area as a separate zone. The split(s) and the new divider are one history
+ * entry; the whole net change is recorded so undo/redo restore the exact graph.
+ */
+export class AddDividerCommand implements Command {
+  readonly label = 'Add divider'
+  private applied = false
+  private addedNodes: Node[] = []
+  private addedWalls: Wall[] = []
+  private removedWalls: Wall[] = []
+  private divider?: Divider
+
+  constructor(
+    private readonly posA: Vec2,
+    private readonly posB: Vec2,
+    private readonly opts: { snapDist?: number } = {},
+  ) {}
+
+  do(doc: SceneDocument): void {
+    if (this.applied) {
+      // redo: replay the recorded net changeset (drop the split originals, then
+      // re-insert every node, wall half and the divider created the first time)
+      const removed = new Set(this.removedWalls.map((w) => w.id))
+      doc.walls = doc.walls.filter((w) => !removed.has(w.id))
+      for (const node of this.addedNodes) doc.nodes[node.id] = node
+      doc.walls.push(...this.addedWalls)
+      if (this.divider) doc.dividers.push(this.divider)
+      return
+    }
+    const beforeNodes = new Set(Object.keys(doc.nodes))
+    const beforeWalls = new Map(doc.walls.map((w) => [w.id, w]))
+    const snapDist = this.opts.snapDist ?? 0
+    splitUnderPoint(doc, this.posA, snapDist)
+    splitUnderPoint(doc, this.posB, snapDist)
+    this.divider = addDividerBetween(doc, this.posA, this.posB, snapDist)
+    this.addedNodes = Object.values(doc.nodes).filter((node) => !beforeNodes.has(node.id))
+    const afterWalls = new Set(doc.walls.map((w) => w.id))
+    this.addedWalls = doc.walls.filter((w) => !beforeWalls.has(w.id))
+    this.removedWalls = [...beforeWalls.values()].filter((w) => !afterWalls.has(w.id))
+    this.applied = true
+  }
+
+  undo(doc: SceneDocument): void {
+    if (this.divider) {
+      const id = this.divider.id
+      doc.dividers = doc.dividers.filter((d) => d.id !== id)
+    }
+    const added = new Set(this.addedWalls.map((w) => w.id))
+    doc.walls = doc.walls.filter((w) => !added.has(w.id))
+    for (const node of this.addedNodes) delete doc.nodes[node.id]
+    doc.walls.push(...this.removedWalls)
+  }
+}
+
 /** Deletes a wall, restoring it (and any GC'd endpoints) on undo. */
 export class RemoveWallCommand implements Command {
   readonly label = 'Delete wall'
@@ -187,13 +259,15 @@ export class SetWallPropsCommand implements Command {
 }
 
 /**
- * Deletes a vertex by deleting every wall that meets at it (a vertex cannot
- * exist without walls); far endpoints left wall-less are GC'd along the way.
- * Undo restores all removed walls and nodes.
+ * Deletes a vertex by deleting every edge that meets at it — walls and zoning
+ * dividers alike (a vertex cannot exist without edges); far endpoints left
+ * edge-less are GC'd along the way. Undo restores all removed walls, dividers
+ * and nodes.
  */
 export class RemoveNodeCommand implements Command {
   readonly label = 'Delete vertex'
   private removedWalls: Wall[] = []
+  private removedDividers: Divider[] = []
   private removedNodes: Node[] = []
 
   constructor(private readonly nodeId: NodeId) {}
@@ -201,7 +275,9 @@ export class RemoveNodeCommand implements Command {
   do(doc: SceneDocument): void {
     const before = { ...doc.nodes }
     this.removedWalls = wallsAtNode(doc, this.nodeId)
+    this.removedDividers = dividersAtNode(doc, this.nodeId)
     for (const wall of this.removedWalls) removeWall(doc, wall.id)
+    for (const divider of this.removedDividers) removeDivider(doc, divider.id)
     this.removedNodes = Object.keys(before)
       .filter((id) => !(id in doc.nodes))
       .map((id) => before[id] as Node)
@@ -210,6 +286,7 @@ export class RemoveNodeCommand implements Command {
   undo(doc: SceneDocument): void {
     for (const node of this.removedNodes) doc.nodes[node.id] = node
     doc.walls.push(...this.removedWalls)
+    doc.dividers.push(...this.removedDividers)
   }
 }
 
@@ -251,7 +328,7 @@ export class RemoveRoomCommand implements Command {
 export class MergeNodesCommand implements Command {
   readonly label = 'Merge vertices'
   private sourceNode?: Node
-  private report: MergeReport = { rewired: [], removedWalls: [] }
+  private report: MergeReport = { rewired: [], removedWalls: [], removedDividers: [] }
 
   constructor(
     private readonly sourceId: NodeId,
@@ -270,9 +347,10 @@ export class MergeNodesCommand implements Command {
     doc.nodes[this.sourceNode.id] = this.sourceNode
     // dropped duplicates return first so the rewiring below reaches them too
     doc.walls.push(...this.report.removedWalls)
-    for (const { wallId, end } of this.report.rewired) {
-      const wall = findWall(doc, wallId)
-      if (wall) wall[end] = this.sourceId
+    doc.dividers.push(...this.report.removedDividers)
+    for (const { kind, id, end } of this.report.rewired) {
+      const edge = kind === 'wall' ? findWall(doc, id) : findDivider(doc, id)
+      if (edge) edge[end] = this.sourceId
     }
   }
 }

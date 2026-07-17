@@ -43,6 +43,16 @@ function toggle(tool: Exclude<ToolId, 'select'>) {
     </BaseButton>
 
     <BaseButton
+      :variant="activeTool === 'split' ? 'primary' : 'ghost'"
+      icon="split"
+      class="w-full justify-start"
+      :aria-pressed="activeTool === 'split'"
+      @click="toggle('split')"
+    >
+      Split into zones
+    </BaseButton>
+
+    <BaseButton
       :variant="activeTool === 'door' ? 'primary' : 'ghost'"
       icon="door"
       class="w-full justify-start"

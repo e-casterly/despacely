@@ -22,6 +22,8 @@ const TOKENS = {
   wall3d: '--color-wall-3d',
   floor3d: '--color-floor-3d',
   opening: '--color-opening',
+  /** zoning divider: a dashed line subdividing a room, no wall body */
+  divider: '--color-divider',
   /** selection, ghosts, guides and every measurement the editor writes */
   accent: '--color-accent',
   /** the fill a newly placed item takes; an item's own colour then lives in the document */

@@ -4,10 +4,11 @@ import type { SceneDocument, Wall } from './types'
  * Validates a raw value loaded from persistence into a scene document, and
  * normalizes fields that older documents predate.
  *
- * Openings were added after documents were already being saved, so every wall
- * stored before then lacks the array. There is no version field to hang a
- * migration on, so defaulting it here *is* the migration — without it the first
- * `wall.openings.push(...)` would throw on any pre-existing project.
+ * Openings and dividers were both added after documents were already being
+ * saved, so projects stored before then lack those arrays. There is no version
+ * field to hang a migration on, so defaulting them here *is* the migration —
+ * without it the first `wall.openings.push(...)` / `doc.dividers.push(...)` would
+ * throw on any pre-existing project.
  */
 export function parseDocument(raw: unknown): SceneDocument {
   if (typeof raw !== 'object' || raw === null) {
@@ -23,5 +24,6 @@ export function parseDocument(raw: unknown): SceneDocument {
   for (const wall of doc.walls as Wall[]) {
     if (!Array.isArray(wall.openings)) wall.openings = []
   }
+  if (!Array.isArray(doc.dividers)) doc.dividers = []
   return raw as SceneDocument
 }

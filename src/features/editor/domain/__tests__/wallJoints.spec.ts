@@ -11,6 +11,7 @@ function makeDoc(
     nodes: Object.fromEntries(Object.entries(nodes).map(([id, pos]) => [id, { id, pos }])),
     // joint geometry doesn't depend on either, so both take a default here
     walls: walls.map((w) => ({ height: 270, openings: [], ...w })),
+    dividers: [],
     items: [],
   }
 }

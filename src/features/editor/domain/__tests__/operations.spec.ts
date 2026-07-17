@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addDivider,
   addItem,
   addNode,
   addWall,
   addWallBetween,
-  collapsesAWall,
+  collapsesAnEdge,
   createEmptyDocument,
+  dividersAtNode,
   docBounds,
+  findDivider,
   findItem,
   mergeNodes,
   findOpening,
@@ -14,7 +17,9 @@ import {
   moveItem,
   moveNode,
   nodeAt,
+  nodeReferenced,
   nodesConnected,
+  removeDivider,
   removeItem,
   removeWall,
   splitWallAt,
@@ -44,7 +49,49 @@ function makeItem(id = 'i1'): Item {
 
 describe('document', () => {
   it('creates an empty document', () => {
-    expect(createEmptyDocument()).toEqual({ nodes: {}, walls: [], items: [] })
+    expect(createEmptyDocument()).toEqual({ nodes: {}, walls: [], dividers: [], items: [] })
+  })
+})
+
+describe('dividers', () => {
+  it('adds and finds a divider between two nodes', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+
+    const divider = addDivider(doc, a, b)
+
+    expect(doc.dividers).toHaveLength(1)
+    expect(findDivider(doc, divider.id)).toBe(divider)
+  })
+
+  it('keeps a node a wall and a divider share alive when the wall is removed', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const wall = addWall(doc, a, b)
+    addDivider(doc, a, b)
+
+    removeWall(doc, wall.id)
+
+    // the divider still references both endpoints, so neither is GC'd
+    expect(doc.nodes[a]).toBeDefined()
+    expect(doc.nodes[b]).toBeDefined()
+    expect(nodeReferenced(doc, a)).toBe(true)
+  })
+
+  it('garbage-collects an endpoint no edge references once its divider is removed', () => {
+    const doc = createEmptyDocument()
+    const shared = addNode(doc, { x: 0, y: 0 })
+    const loose = addNode(doc, { x: 100, y: 0 })
+    addWall(doc, shared, addNode(doc, { x: 0, y: 100 })) // keeps `shared` alive
+    const divider = addDivider(doc, shared, loose)
+
+    removeDivider(doc, divider.id)
+
+    expect(doc.dividers).toHaveLength(0)
+    expect(doc.nodes[loose]).toBeUndefined() // held only by the divider
+    expect(doc.nodes[shared]).toBeDefined() // still on a wall
   })
 })
 
@@ -131,15 +178,15 @@ describe('removeWall (orphan GC)', () => {
   })
 })
 
-describe('collapsesAWall', () => {
+describe('collapsesAnEdge', () => {
   it('detects a node landing on its wall neighbour', () => {
     const doc = createEmptyDocument()
     const a = addNode(doc, { x: 0, y: 0 })
     const b = addNode(doc, { x: 100, y: 0 })
     addWall(doc, a, b)
 
-    expect(collapsesAWall(doc, { [a]: { x: 100, y: 0 } })).toBe(true)
-    expect(collapsesAWall(doc, { [a]: { x: 50, y: 50 } })).toBe(false)
+    expect(collapsesAnEdge(doc, { [a]: { x: 100, y: 0 } })).toBe(true)
+    expect(collapsesAnEdge(doc, { [a]: { x: 50, y: 50 } })).toBe(false)
   })
 
   it('checks moved positions against each other, not only the doc', () => {
@@ -149,7 +196,7 @@ describe('collapsesAWall', () => {
     const b = addNode(doc, { x: 100, y: 0 })
     addWall(doc, a, b)
 
-    expect(collapsesAWall(doc, { [a]: { x: 5, y: 5 }, [b]: { x: 5, y: 5 } })).toBe(true)
+    expect(collapsesAnEdge(doc, { [a]: { x: 5, y: 5 }, [b]: { x: 5, y: 5 } })).toBe(true)
   })
 
   it('ignores unrelated nodes at equal positions', () => {
@@ -162,7 +209,16 @@ describe('collapsesAWall', () => {
     addWall(doc, a, b)
     addWall(doc, c, d)
 
-    expect(collapsesAWall(doc, { [c]: { x: 0, y: 0 } })).toBe(false) // lands on a, no shared wall
+    expect(collapsesAnEdge(doc, { [c]: { x: 0, y: 0 } })).toBe(false) // lands on a, no shared wall
+  })
+
+  it('also catches a divider collapsed to zero length', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    addDivider(doc, a, b)
+
+    expect(collapsesAnEdge(doc, { [a]: { x: 100, y: 0 } })).toBe(true)
   })
 })
 
@@ -196,6 +252,27 @@ describe('queries', () => {
     expect(nodesConnected(doc, a, c)).toBe(false)
   })
 
+  it('nodesConnected also sees a divider joining the two nodes', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    addDivider(doc, a, b)
+
+    expect(nodesConnected(doc, a, b)).toBe(true)
+  })
+
+  it('dividersAtNode returns incident dividers', () => {
+    const doc = createEmptyDocument()
+    const corner = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 0, y: 100 })
+    addDivider(doc, corner, b)
+    addDivider(doc, corner, c)
+
+    expect(dividersAtNode(doc, corner)).toHaveLength(2)
+    expect(dividersAtNode(doc, b)).toHaveLength(1)
+  })
+
   it('wallsAtNode returns incident walls', () => {
     const doc = createEmptyDocument()
     const a = addNode(doc, { x: 0, y: 0 })
@@ -226,7 +303,42 @@ describe('mergeNodes', () => {
     expect(wall.b).toBe(c)
     expect(doc.walls).toHaveLength(2)
     expect(wallsAtNode(doc, c)).toHaveLength(2)
-    expect(report).toEqual({ rewired: [{ wallId: wall.id, end: 'b' }], removedWalls: [] })
+    expect(report).toEqual({
+      rewired: [{ kind: 'wall', id: wall.id, end: 'b' }],
+      removedWalls: [],
+      removedDividers: [],
+    })
+  })
+
+  it('rewires a divider at the source and drops it if it lands on a wall', () => {
+    // a wall a-b and a divider a-c; welding c onto b makes the divider a-b,
+    // which now lies exactly on the wall, so it is dropped
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 100, y: 50 })
+    addWall(doc, a, b)
+    const divider = addDivider(doc, a, c)
+
+    const report = mergeNodes(doc, c, b)
+
+    expect(doc.dividers).toHaveLength(0)
+    expect(report.removedDividers).toEqual([divider])
+  })
+
+  it('keeps a rewired divider that stays distinct from every wall', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 50, y: 100 })
+    const merged = addNode(doc, { x: 50, y: 0 })
+    addWall(doc, a, b)
+    const divider = addDivider(doc, c, merged)
+
+    mergeNodes(doc, merged, a) // divider becomes c-a, not on any wall
+
+    expect(doc.dividers).toEqual([divider])
+    expect(divider.b).toBe(a)
   })
 
   it('drops a wall that the merge turns into a duplicate', () => {

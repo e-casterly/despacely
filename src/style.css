@@ -34,6 +34,10 @@
   /* door/window symbols: a thin, darker line inside the gap. Darker than the wall
      it is cut into on purpose — a hairline reads as detail, not as mass. */
   --color-opening: #64748b;
+  /* zoning dividers: a dashed slate line, no mass. It splits a room into zones
+     without building anything, so it reads lighter than a wall and the dashes
+     mark it as a boundary rather than structure. */
+  --color-divider: #94a3b8;
   /* canvas text (room areas): near-black, so the numbers you actually read carry
      more weight than anything drawn under them */
   --color-label: #0f172a;

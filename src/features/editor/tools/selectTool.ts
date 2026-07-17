@@ -8,7 +8,7 @@ import {
 import { projectOnSegment } from '../domain/geometry'
 import { offsetRange, openingAtPoint, overlapsAnotherOpening, sideOfWall } from '../domain/openings'
 import {
-  collapsesAWall,
+  collapsesAnEdge,
   findWall,
   nodeAt,
   nodesConnected,
@@ -244,7 +244,7 @@ export function createSelectTool(): Tool {
         const moved = wall.openings.find((opening) => opening.id === sliding.openingId)
         if (!moved) return
         // a neighbouring opening blocks the way: hold at the last good offset
-        // rather than sliding through it (the collapsesAWall refusal idiom)
+        // rather than sliding through it (the collapsesAnEdge refusal idiom)
         if (!overlapsAnotherOpening(wall, { ...moved, offset: next })) drag.to = next
         // a door also re-picks its swing side from the pointer's face of the wall,
         // so a perpendicular drag flips it even when it slides nowhere; windows are
@@ -260,7 +260,7 @@ export function createSelectTool(): Tool {
         if (
           target &&
           !nodesConnected(ctx.doc, drag.nodeId, target.id) &&
-          !collapsesAWall(ctx.doc, { [drag.nodeId]: target.pos })
+          !collapsesAnEdge(ctx.doc, { [drag.nodeId]: target.pos })
         ) {
           drag.to = target.pos
           drag.mergeInto = target.id
@@ -277,7 +277,7 @@ export function createSelectTool(): Tool {
           snapToNodes: false,
         })
         // refuse positions that would collapse a wall to zero length
-        if (!collapsesAWall(ctx.doc, { [drag.nodeId]: point })) {
+        if (!collapsesAnEdge(ctx.doc, { [drag.nodeId]: point })) {
           drag.to = point
           drag.guides = guides
         } else {
@@ -288,7 +288,7 @@ export function createSelectTool(): Tool {
       const raw = { x: input.world.x - drag.grab.x, y: input.world.y - drag.grab.y }
       const { delta, guides } = snapTranslation(ctx.doc, drag.ends, raw, ctx.snapDist)
       // a neighbour sharing a corner may collapse when the wall lands on it
-      if (!collapsesAWall(ctx.doc, draggedNodes({ ...drag, delta }))) {
+      if (!collapsesAnEdge(ctx.doc, draggedNodes({ ...drag, delta }))) {
         drag.delta = delta
         drag.guides = guides
       } else {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AddDividerCommand,
   AddItemCommand,
   AddOpeningCommand,
   AddRoomCommand,
@@ -17,6 +18,7 @@ import {
   SetWallPropsCommand,
 } from '../commands'
 import {
+  addDivider,
   addNode,
   addWall,
   createEmptyDocument,
@@ -197,6 +199,78 @@ describe('AddWallCommand', () => {
   })
 })
 
+describe('AddDividerCommand', () => {
+  it('adds a divider on do, removes it and created nodes on undo', () => {
+    const doc = createEmptyDocument()
+    const cmd = new AddDividerCommand({ x: 0, y: 0 }, { x: 100, y: 0 }, { snapDist: 5 })
+
+    cmd.do(doc)
+    expect(doc.dividers).toHaveLength(1)
+    expect(Object.keys(doc.nodes)).toHaveLength(2)
+
+    cmd.undo(doc)
+    expect(doc.dividers).toHaveLength(0)
+    expect(doc.nodes).toEqual({})
+  })
+
+  it('redoes with the same divider and node ids', () => {
+    const doc = createEmptyDocument()
+    const cmd = new AddDividerCommand({ x: 0, y: 0 }, { x: 100, y: 0 }, { snapDist: 5 })
+
+    cmd.do(doc)
+    const dividerId = doc.dividers[0]!.id
+    const nodeIds = Object.keys(doc.nodes).sort()
+
+    cmd.undo(doc)
+    cmd.do(doc) // redo
+
+    expect(doc.dividers[0]!.id).toBe(dividerId)
+    expect(Object.keys(doc.nodes).sort()).toEqual(nodeIds)
+  })
+
+  it('zones a room by splitting the two walls its endpoints land on', () => {
+    const doc = createEmptyDocument()
+    const tl = addNode(doc, { x: 0, y: 0 })
+    const tr = addNode(doc, { x: 200, y: 0 })
+    const br = addNode(doc, { x: 200, y: 100 })
+    const bl = addNode(doc, { x: 0, y: 100 })
+    for (const [p, q] of [[tl, tr], [tr, br], [br, bl], [bl, tl]] as const) addWall(doc, p, q)
+    expect(detectRooms(doc)).toHaveLength(1)
+
+    // a zero-thickness divider from the middle of the top wall to the bottom wall
+    new AddDividerCommand({ x: 100, y: 0 }, { x: 100, y: 100 }, { snapDist: 5 }).do(doc)
+
+    expect(doc.walls).toHaveLength(6) // each crossed wall split into two halves
+    expect(doc.dividers).toHaveLength(1)
+    const zones = detectRooms(doc)
+    expect(zones).toHaveLength(2)
+    expect(zones.map((z) => z.area)).toEqual([100 * 100, 100 * 100])
+  })
+
+  it('undoes the zoning, restoring the single room and the original walls', () => {
+    const doc = createEmptyDocument()
+    const tl = addNode(doc, { x: 0, y: 0 })
+    const tr = addNode(doc, { x: 200, y: 0 })
+    const br = addNode(doc, { x: 200, y: 100 })
+    const bl = addNode(doc, { x: 0, y: 100 })
+    const walls = [
+      [tl, tr],
+      [tr, br],
+      [br, bl],
+      [bl, tl],
+    ].map(([p, q]) => addWall(doc, p!, q!))
+    const cmd = new AddDividerCommand({ x: 100, y: 0 }, { x: 100, y: 100 }, { snapDist: 5 })
+
+    cmd.do(doc)
+    cmd.undo(doc)
+
+    expect(doc.dividers).toHaveLength(0)
+    expect(doc.walls.map((w) => w.id).sort()).toEqual(walls.map((w) => w.id).sort())
+    expect(Object.keys(doc.nodes)).toHaveLength(4) // the two split nodes are gone
+    expect(detectRooms(doc)).toHaveLength(1)
+  })
+})
+
 describe('AddRoomCommand', () => {
   // a 200x100 rectangle, corners in order
   const rect = [
@@ -362,6 +436,27 @@ describe('RemoveNodeCommand', () => {
     expect(doc.walls).toHaveLength(3)
     expect(Object.keys(doc.nodes)).toHaveLength(4)
   })
+
+  it('also deletes zoning dividers meeting at the vertex and restores them on undo', () => {
+    // a wall a-b and a divider b-c both meet at b; deleting b clears both
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 100, y: 100 })
+    addWall(doc, a, b)
+    addDivider(doc, b, c)
+
+    const cmd = new RemoveNodeCommand(b)
+    cmd.do(doc)
+    expect(doc.walls).toHaveLength(0)
+    expect(doc.dividers).toHaveLength(0)
+    expect(doc.nodes).toEqual({})
+
+    cmd.undo(doc)
+    expect(doc.walls).toHaveLength(1)
+    expect(doc.dividers).toHaveLength(1)
+    expect(Object.keys(doc.nodes)).toHaveLength(3)
+  })
 })
 
 describe('MergeNodesCommand', () => {
@@ -406,6 +501,26 @@ describe('MergeNodesCommand', () => {
     cmd.do(doc) // redo arrives at the same result
     expect(doc.walls).toHaveLength(1)
     expect(doc.nodes[a]).toBeUndefined()
+  })
+
+  it('rewires a divider onto the merge target and rolls it back on undo', () => {
+    // divider c-d welds its end d onto wall vertex b
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const c = addNode(doc, { x: 50, y: 100 })
+    const d = addNode(doc, { x: 100, y: 50 })
+    addWall(doc, a, b)
+    const divider = addDivider(doc, c, d)
+
+    const cmd = new MergeNodesCommand(d, b)
+    cmd.do(doc)
+    expect(doc.nodes[d]).toBeUndefined()
+    expect(divider.b).toBe(b) // now hangs off the welded vertex
+
+    cmd.undo(doc)
+    expect(divider.b).toBe(d)
+    expect(doc.nodes[d]!.pos).toEqual({ x: 100, y: 50 })
   })
 })
 

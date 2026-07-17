@@ -1,5 +1,5 @@
 import { distToSegment, projectOnSegment } from './geometry'
-import type { Item, Node, NodeId, Opening, SceneDocument, Vec2, Wall } from './types'
+import type { Divider, Item, Node, NodeId, Opening, SceneDocument, Vec2, Wall } from './types'
 import { WALL_HEIGHT, WALL_THICKNESS } from './units'
 
 export interface WallOptions {
@@ -8,7 +8,7 @@ export interface WallOptions {
 }
 
 export function createEmptyDocument(): SceneDocument {
-  return { nodes: {}, walls: [], items: [] }
+  return { nodes: {}, walls: [], dividers: [], items: [] }
 }
 
 // --- nodes ---
@@ -38,9 +38,11 @@ export function nodeAt(doc: SceneDocument, pos: Vec2, maxDist: number, except?: 
   return best
 }
 
-/** True when some wall connects the two nodes directly. */
+/** True when some edge — wall or divider — connects the two nodes directly. */
 export function nodesConnected(doc: SceneDocument, a: NodeId, b: NodeId): boolean {
-  return doc.walls.some((wall) => (wall.a === a && wall.b === b) || (wall.a === b && wall.b === a))
+  return [...doc.walls, ...doc.dividers].some(
+    (edge) => (edge.a === a && edge.b === b) || (edge.a === b && edge.b === a),
+  )
 }
 
 export function moveNode(doc: SceneDocument, id: NodeId, pos: Vec2): void {
@@ -50,6 +52,18 @@ export function moveNode(doc: SceneDocument, id: NodeId, pos: Vec2): void {
 
 export function wallsAtNode(doc: SceneDocument, nodeId: NodeId): Wall[] {
   return doc.walls.filter((wall) => wall.a === nodeId || wall.b === nodeId)
+}
+
+/**
+ * True while any edge — wall or divider — still references the node, so it must
+ * survive GC. Walls and dividers share the node graph: a corner may be held by a
+ * divider after its last wall is gone, and vice versa.
+ */
+export function nodeReferenced(doc: SceneDocument, nodeId: NodeId): boolean {
+  return (
+    doc.walls.some((wall) => wall.a === nodeId || wall.b === nodeId) ||
+    doc.dividers.some((divider) => divider.a === nodeId || divider.b === nodeId)
+  )
 }
 
 function reuseOrAddNode(doc: SceneDocument, pos: Vec2, snapDist: number): NodeId {
@@ -262,60 +276,133 @@ export function removeWall(doc: SceneDocument, id: string): void {
   doc.walls = doc.walls.filter((w) => w.id !== id)
 
   for (const nodeId of new Set([wall.a, wall.b])) {
-    if (wallsAtNode(doc, nodeId).length === 0) delete doc.nodes[nodeId]
+    if (!nodeReferenced(doc, nodeId)) delete doc.nodes[nodeId]
+  }
+}
+
+// --- dividers (zero-thickness zoning lines; share the wall node graph) ---
+
+export function addDivider(doc: SceneDocument, a: NodeId, b: NodeId): Divider {
+  const divider: Divider = { id: crypto.randomUUID(), a, b }
+  doc.dividers.push(divider)
+  return divider
+}
+
+/**
+ * High-level constructor mirroring {@link addWallBetween}: snaps each endpoint to
+ * a nearby existing node — reusing it so the divider connects into the graph and
+ * closes a zone — or creates one. Returns undefined for a degenerate zero-length
+ * divider.
+ */
+export function addDividerBetween(
+  doc: SceneDocument,
+  posA: Vec2,
+  posB: Vec2,
+  snapDist = 0,
+): Divider | undefined {
+  const a = reuseOrAddNode(doc, posA, snapDist)
+  const b = reuseOrAddNode(doc, posB, snapDist)
+  if (a === b) return undefined
+  return addDivider(doc, a, b)
+}
+
+export function findDivider(doc: SceneDocument, id: string): Divider | undefined {
+  return doc.dividers.find((divider) => divider.id === id)
+}
+
+export function dividersAtNode(doc: SceneDocument, nodeId: NodeId): Divider[] {
+  return doc.dividers.filter((divider) => divider.a === nodeId || divider.b === nodeId)
+}
+
+/** Removes a divider and garbage-collects any endpoint no edge references anymore. */
+export function removeDivider(doc: SceneDocument, id: string): void {
+  const divider = findDivider(doc, id)
+  if (!divider) return
+
+  doc.dividers = doc.dividers.filter((d) => d.id !== id)
+
+  for (const nodeId of new Set([divider.a, divider.b])) {
+    if (!nodeReferenced(doc, nodeId)) delete doc.nodes[nodeId]
   }
 }
 
 /**
- * True if placing nodes at the given positions would give some wall zero
- * length. Used to refuse such moves (drag preview, inspector coordinate edits).
+ * True if placing nodes at the given positions would give some edge — a wall or
+ * a zoning divider — zero length. Used to refuse such moves (drag preview,
+ * inspector coordinate edits).
  */
-export function collapsesAWall(doc: SceneDocument, moved: Record<NodeId, Vec2>): boolean {
-  return doc.walls.some((wall) => {
-    const a = moved[wall.a] ?? doc.nodes[wall.a]!.pos
-    const b = moved[wall.b] ?? doc.nodes[wall.b]!.pos
+export function collapsesAnEdge(doc: SceneDocument, moved: Record<NodeId, Vec2>): boolean {
+  return [...doc.walls, ...doc.dividers].some((edge) => {
+    const a = moved[edge.a] ?? doc.nodes[edge.a]!.pos
+    const b = moved[edge.b] ?? doc.nodes[edge.b]!.pos
     return a.x === b.x && a.y === b.y
   })
 }
 
 /** What mergeNodes changed — enough for a command to undo it. */
 export interface MergeReport {
-  /** wall endpoints that were rewired from the source to the target */
-  rewired: { wallId: string; end: 'a' | 'b' }[]
+  /** wall and divider endpoints rewired from the source to the target */
+  rewired: { kind: 'wall' | 'divider'; id: string; end: 'a' | 'b' }[]
   /** walls dropped because rewiring made them span the same pair as another wall */
   removedWalls: Wall[]
+  /** dividers dropped: now duplicating another divider, lying on a wall, or degenerate */
+  removedDividers: Divider[]
 }
 
 /**
- * Welds `source` into `target`: every wall at the source is rewired to the
- * target, rewired walls that now duplicate another wall are dropped, and the
- * source node is deleted. The two nodes must not share a wall — it would
- * collapse to zero length (callers guard against that).
+ * Welds `source` into `target`: every edge at the source — wall or divider — is
+ * rewired to the target, rewired edges that now duplicate another (a divider on
+ * a wall counts) or collapsed to zero length are dropped, and the source node is
+ * deleted. The two nodes must not share an edge — it would collapse (callers
+ * guard against that via {@link nodesConnected}).
  */
 export function mergeNodes(doc: SceneDocument, sourceId: NodeId, targetId: NodeId): MergeReport {
   const rewired: MergeReport['rewired'] = []
   for (const wall of doc.walls) {
     if (wall.a === sourceId) {
       wall.a = targetId
-      rewired.push({ wallId: wall.id, end: 'a' })
+      rewired.push({ kind: 'wall', id: wall.id, end: 'a' })
     }
     if (wall.b === sourceId) {
       wall.b = targetId
-      rewired.push({ wallId: wall.id, end: 'b' })
+      rewired.push({ kind: 'wall', id: wall.id, end: 'b' })
     }
   }
-  const pair = (wall: Wall) => (wall.a < wall.b ? `${wall.a}:${wall.b}` : `${wall.b}:${wall.a}`)
+  for (const divider of doc.dividers) {
+    if (divider.a === sourceId) {
+      divider.a = targetId
+      rewired.push({ kind: 'divider', id: divider.id, end: 'a' })
+    }
+    if (divider.b === sourceId) {
+      divider.b = targetId
+      rewired.push({ kind: 'divider', id: divider.id, end: 'b' })
+    }
+  }
+  const pair = (e: { a: NodeId; b: NodeId }) => (e.a < e.b ? `${e.a}:${e.b}` : `${e.b}:${e.a}`)
   const removedWalls: Wall[] = []
-  for (const { wallId } of rewired) {
-    const wall = findWall(doc, wallId)
+  for (const { kind, id } of rewired) {
+    if (kind !== 'wall') continue
+    const wall = findWall(doc, id)
     if (!wall) continue // already dropped as a duplicate
     if (doc.walls.some((other) => other !== wall && pair(other) === pair(wall))) {
       doc.walls = doc.walls.filter((w) => w !== wall)
       removedWalls.push(wall)
     }
   }
+  const removedDividers: Divider[] = []
+  for (const { kind, id } of rewired) {
+    if (kind !== 'divider') continue
+    const divider = findDivider(doc, id)
+    if (!divider) continue // already dropped
+    const duplicate = doc.dividers.some((other) => other !== divider && pair(other) === pair(divider))
+    const onWall = doc.walls.some((wall) => pair(wall) === pair(divider))
+    if (divider.a === divider.b || duplicate || onWall) {
+      doc.dividers = doc.dividers.filter((d) => d !== divider)
+      removedDividers.push(divider)
+    }
+  }
   delete doc.nodes[sourceId]
-  return { rewired, removedWalls }
+  return { rewired, removedWalls, removedDividers }
 }
 
 export interface Bounds {

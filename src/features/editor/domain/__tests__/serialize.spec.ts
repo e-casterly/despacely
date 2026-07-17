@@ -35,6 +35,24 @@ describe('parseDocument', () => {
     expect(doc.walls[0]!.openings).toEqual([])
   })
 
+  it('gives a document saved before dividers existed an empty dividers array', () => {
+    const legacy = {
+      nodes: {},
+      walls: [],
+      items: [],
+    }
+
+    // without this, the first divider drawn into an old project would throw
+    expect(parseDocument(legacy).dividers).toEqual([])
+  })
+
+  it('leaves dividers alone on a document that already has them', () => {
+    const doc = createEmptyDocument()
+    doc.dividers.push({ id: 'd1', a: 'n1', b: 'n2' })
+
+    expect(parseDocument(doc).dividers).toEqual([{ id: 'd1', a: 'n1', b: 'n2' }])
+  })
+
   it('leaves openings alone on a document that already has them', () => {
     const doc = createEmptyDocument()
     const opening = { id: 'o1', kind: 'door' as const, offset: 50, width: 90, height: 210, sill: 0 }

@@ -63,6 +63,19 @@ export interface Wall {
   openings: Opening[]
 }
 
+/**
+ * A zero-thickness zoning line in the wall graph. Unlike a wall it has no
+ * thickness, height, openings, faces or 3D body — it exists only to subdivide an
+ * open space into measured zones (прихожая/кухня/зал in one room). It shares the
+ * node graph with walls, so `detectRooms` treats it as an edge and a divider
+ * drawn across a room splits it into two zones.
+ */
+export interface Divider {
+  id: string
+  a: NodeId
+  b: NodeId
+}
+
 export interface Item {
   id: string
   kind: 'box'
@@ -79,5 +92,7 @@ export interface SceneDocument {
   /** wall graph vertices, keyed by id for O(1) lookup */
   nodes: Record<NodeId, Node>
   walls: Wall[]
+  /** zero-thickness zoning lines; share the node graph with walls */
+  dividers: Divider[]
   items: Item[]
 }

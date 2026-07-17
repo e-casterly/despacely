@@ -14,7 +14,7 @@ import {
   wallClearRange,
 } from '../domain/openings'
 import {
-  collapsesAWall,
+  collapsesAnEdge,
   findNode,
   findOpening,
   findWall,
@@ -197,7 +197,7 @@ function commitNodeCoord(axis: 'x' | 'y', next: number) {
   const from = { x: node.value.x, y: node.value.y }
   const to = { ...from, [axis]: next }
   // refuse a position that would collapse a wall; the field snaps back itself
-  if (collapsesAWall(editor.doc, { [node.value.id]: to })) return
+  if (collapsesAnEdge(editor.doc, { [node.value.id]: to })) return
   editor.apply(new MoveNodeCommand(node.value.id, from, to))
 }
 </script>

@@ -4,8 +4,9 @@ import type { Guide } from '../domain/snapping'
 import type { NodeId, OpeningKind, SceneDocument, SwingSide, Vec2 } from '../domain/types'
 
 /** The editor's active interaction mode. 'select' is the neutral mode.
- * 'door' and 'window' are the two OpeningKinds, so one tool factory serves both. */
-export type ToolId = 'select' | 'wall' | 'room' | 'door' | 'window'
+ * 'door' and 'window' are the two OpeningKinds, so one tool factory serves both.
+ * 'split' draws zero-thickness zoning dividers that subdivide a room into zones. */
+export type ToolId = 'select' | 'wall' | 'room' | 'door' | 'window' | 'split'
 
 /** A pointer event delivered to a tool in world coordinates (cm). */
 export interface PointerInput {
@@ -46,6 +47,11 @@ export interface GhostOpening {
 /** Transient visuals a tool draws over the scene (e.g. the wall being placed). */
 export interface ToolOverlay {
   ghostWall?: { a: Vec2; b: Vec2 }
+  /** In-progress zoning divider: a zero-thickness cut being drawn across a room. */
+  ghostDivider?: { a: Vec2; b: Vec2 }
+  /** Preview dots the split tool drops where an endpoint has snapped onto a wall
+   * or vertex — the visual feedback that the divider will attach there. */
+  previewNodes?: Vec2[]
   /** In-progress room: the ordered corners of the closed loop being drawn. */
   ghostRoom?: Vec2[]
   /** A room still too small to place: shown as a light outline, not the full ghost. */

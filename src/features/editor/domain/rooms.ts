@@ -194,15 +194,18 @@ export function wallFaceSides(
 }
 
 /**
- * Adjacency of the wall graph with dead ends pruned: nodes of degree ≤ 1 are
- * removed repeatedly, so every surviving edge can lie on a cycle and room
- * contours stay simple polygons (no zero-width spurs poking inside).
+ * Adjacency of the wall graph — walls and zoning dividers alike, since a divider
+ * bounds a zone exactly as a wall bounds a room — with dead ends pruned: nodes of
+ * degree ≤ 1 are removed repeatedly, so every surviving edge can lie on a cycle
+ * and room contours stay simple polygons (no zero-width spurs poking inside).
  */
 function cycleNeighbors(doc: SceneDocument): Map<NodeId, NodeId[]> {
   const neighbors = new Map<NodeId, NodeId[]>()
-  for (const wall of doc.walls) {
-    neighbors.set(wall.a, [...(neighbors.get(wall.a) ?? []), wall.b])
-    neighbors.set(wall.b, [...(neighbors.get(wall.b) ?? []), wall.a])
+  const link = (from: NodeId, to: NodeId) =>
+    neighbors.set(from, [...(neighbors.get(from) ?? []), to])
+  for (const edge of [...doc.walls, ...doc.dividers]) {
+    link(edge.a, edge.b)
+    link(edge.b, edge.a)
   }
 
   const leaves = [...neighbors.keys()].filter((id) => neighbors.get(id)!.length <= 1)
