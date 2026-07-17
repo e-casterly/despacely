@@ -14,11 +14,12 @@ import {
   nodeAt,
   nodesConnected,
   wallSegment,
+  wallsAtNode,
   wallUnderPoint,
 } from '../domain/operations'
 import { roomAt, roomKey } from '../domain/rooms'
 import { resolveSnap, type Guide } from '../domain/snapping'
-import type { NodeId, SceneDocument, SwingSide, Vec2 } from '../domain/types'
+import type { NodeId, SceneDocument, SwingSide, Vec2, Wall } from '../domain/types'
 import { computeWallGeometry } from '../domain/wallJoints'
 import type { PointerInput, Tool, ToolContext, ToolOverlay } from './types'
 
@@ -31,10 +32,28 @@ interface DragEnd {
   from: Vec2
 }
 
+/** One end of a divider being dragged: it slides along `line` (its host wall's
+ *  axis), or is pinned (`line === null`) when the end isn't a clean 2-wall split. */
+interface DividerEnd {
+  nodeId: NodeId
+  from: Vec2
+  line: { a: Vec2; b: Vec2 } | null
+}
+
 type Drag =
   | { kind: 'node'; nodeId: NodeId; grab: Vec2; from: Vec2; to: Vec2; mergeInto: NodeId | null; guides: Guide[] }
   // a wall body and a room contour drag the same way: one delta over a node set
   | { kind: 'wall' | 'room'; grab: Vec2; ends: DragEnd[]; delta: Vec2; guides: Guide[] }
+  // a divider translates by sliding each end along its host wall — moving the
+  // split point keeps the two collinear halves straight, so the wall never kinks
+  | {
+      kind: 'divider'
+      dividerId: string
+      grab: Vec2
+      ends: DividerEnd[]
+      moved: Record<NodeId, Vec2>
+      guides: Guide[]
+    }
   // an opening only ever slides along its own wall, so the whole drag is one
   // number: its offset from node A. The wall itself holds still throughout, so
   // its centerline and the offsets it will accept are settled once, at the grab.
@@ -69,6 +88,7 @@ function draggedNodes(drag: NodeDrag): Record<NodeId, Vec2> {
   if (drag.kind === 'node') {
     return samePoint(drag.from, drag.to) ? {} : { [drag.nodeId]: drag.to }
   }
+  if (drag.kind === 'divider') return drag.moved
   if (drag.delta.x === 0 && drag.delta.y === 0) return {}
   return Object.fromEntries(
     drag.ends.map((end) => [
@@ -76,6 +96,28 @@ function draggedNodes(drag: NodeDrag): Record<NodeId, Vec2> {
       { x: end.from.x + drag.delta.x, y: end.from.y + drag.delta.y },
     ]),
   )
+}
+
+/**
+ * The segment a divider endpoint may slide along without kinking its host wall:
+ * the two collinear wall-halves meeting at the node span it corner to corner, so
+ * sliding the split point along that line keeps them straight. Null when the node
+ * isn't a clean two-collinear-wall split (a room corner, a 3+ junction, or a
+ * divider-only end) — such an end stays pinned.
+ */
+function dividerSlideLine(doc: SceneDocument, nodeId: NodeId): { a: Vec2; b: Vec2 } | null {
+  const walls = wallsAtNode(doc, nodeId)
+  if (walls.length !== 2) return null
+  const here = doc.nodes[nodeId]!.pos
+  const far = (wall: Wall): Vec2 => doc.nodes[wall.a === nodeId ? wall.b : wall.a]!.pos
+  const a = far(walls[0]!)
+  const b = far(walls[1]!)
+  // collinear when the two halves leave the node in opposite directions
+  const l1 = Math.hypot(a.x - here.x, a.y - here.y)
+  const l2 = Math.hypot(b.x - here.x, b.y - here.y)
+  if (l1 === 0 || l2 === 0) return null
+  const dot = ((a.x - here.x) * (b.x - here.x) + (a.y - here.y) * (b.y - here.y)) / (l1 * l2)
+  return dot < -0.999 ? { a, b } : null
 }
 
 /**
@@ -197,11 +239,23 @@ export function createSelectTool(): Tool {
         }
         return
       }
-      // a zoning divider crossing the room interior: select it (no drag — its
-      // ends are shared T-nodes on the walls, so moving the body would kink them)
+      // a zoning divider crossing the room interior: select it, and set up a drag
+      // that slides each end along its host wall (see the 'divider' Drag variant)
       const divider = dividerUnderPoint(ctx.doc, input.world, ctx.snapDist)
       if (divider) {
         ctx.select({ kind: 'divider', id: divider.id })
+        drag = {
+          kind: 'divider',
+          dividerId: divider.id,
+          grab: input.world,
+          ends: [divider.a, divider.b].map((nodeId) => ({
+            nodeId,
+            from: { ...ctx.doc.nodes[nodeId]!.pos },
+            line: dividerSlideLine(ctx.doc, nodeId),
+          })),
+          moved: {},
+          guides: [],
+        }
         return
       }
       // nothing solid under the pointer: the room the click landed in, if any.
@@ -232,10 +286,33 @@ export function createSelectTool(): Tool {
         } else if (drag.kind === 'opening') {
           drag.to = drag.from
           drag.side = drag.fromSide
+        } else if (drag.kind === 'divider') {
+          drag.moved = {}
         } else {
           drag.delta = { x: 0, y: 0 }
           drag.guides = []
         }
+        return
+      }
+      if (drag.kind === 'divider') {
+        const delta = { x: input.world.x - drag.grab.x, y: input.world.y - drag.grab.y }
+        const moved: Record<NodeId, Vec2> = {}
+        for (const end of drag.ends) {
+          if (!end.line) continue // a pinned end stays put; the divider pivots on it
+          // slide along the host wall by the drag's component along that line
+          const t = projectOnSegment(
+            { x: end.from.x + delta.x, y: end.from.y + delta.y },
+            end.line.a,
+            end.line.b,
+          ).t
+          const pos = {
+            x: end.line.a.x + (end.line.b.x - end.line.a.x) * t,
+            y: end.line.a.y + (end.line.b.y - end.line.a.y) * t,
+          }
+          if (!samePoint(pos, end.from)) moved[end.nodeId] = pos
+        }
+        // hold at the last good slide if a wall half (or the divider) would collapse
+        if (!collapsesAnEdge(ctx.doc, moved)) drag.moved = moved
         return
       }
       if (drag.kind === 'opening') {
@@ -313,6 +390,15 @@ export function createSelectTool(): Tool {
         if (Object.keys(props).length > 0) {
           ctx.apply(new SetOpeningPropsCommand(drag.openingId, props))
         }
+        drag = null
+        return
+      }
+      if (drag.kind === 'divider') {
+        const sliding = drag
+        const moves = sliding.ends
+          .filter((end) => sliding.moved[end.nodeId])
+          .map((end) => ({ nodeId: end.nodeId, from: end.from, to: sliding.moved[end.nodeId]! }))
+        if (moves.length > 0) ctx.apply(new MoveNodesCommand(moves, 'Move divider'))
         drag = null
         return
       }

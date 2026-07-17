@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SetOpeningPropsCommand, type Command } from '../../domain/commands'
+import { AddDividerCommand, SetOpeningPropsCommand, type Command } from '../../domain/commands'
 import { addDivider, addNode, addWall, createEmptyDocument } from '../../domain/operations'
 import type { Opening, SceneDocument, Vec2 } from '../../domain/types'
 import type { Selection, ToolContext } from '../types'
@@ -32,20 +32,56 @@ describe('selectTool', () => {
     expect(select).toHaveBeenCalledWith({ kind: 'wall', id: wallId })
   })
 
-  it('selects a divider clicked on its line and does not start a drag', () => {
+  it('selects a divider clicked on its line', () => {
     const doc = createEmptyDocument()
     const a = addNode(doc, { x: 0, y: 0 })
     const b = addNode(doc, { x: 200, y: 0 })
     const divider = addDivider(doc, a, b)
-    const { ctx, select, apply } = ctxFor(doc)
+    const { ctx, select } = ctxFor(doc)
+
+    createSelectTool().onPointerDown!(at(100, 3), ctx) // on the line, away from its ends
+    expect(select).toHaveBeenCalledWith({ kind: 'divider', id: divider.id })
+  })
+
+  it('slides a dragged divider along its host walls, keeping the walls straight', () => {
+    // a 200x100 room split by a vertical divider at x=100
+    const doc = createEmptyDocument()
+    const tl = addNode(doc, { x: 0, y: 0 })
+    const tr = addNode(doc, { x: 200, y: 0 })
+    const br = addNode(doc, { x: 200, y: 100 })
+    const bl = addNode(doc, { x: 0, y: 100 })
+    for (const [p, q] of [[tl, tr], [tr, br], [br, bl], [bl, tl]] as const) addWall(doc, p, q)
+    new AddDividerCommand({ x: 100, y: 0 }, { x: 100, y: 100 }, { snapDist: 5 }).do(doc)
+
+    const select = vi.fn<(selection: Selection | null) => void>()
+    const apply = vi.fn<(command: Command) => void>((command) => command.do(doc))
+    const ctx: ToolContext = { doc, apply, select, snapDist: 5 }
     const tool = createSelectTool()
 
-    tool.onPointerDown!(at(100, 3), ctx) // on the divider line, away from its ends
-    expect(select).toHaveBeenCalledWith({ kind: 'divider', id: divider.id })
+    tool.onPointerDown!(at(100, 50), ctx) // grab the divider mid-line
+    tool.onPointerMove!(at(140, 50), ctx) // drag right 40cm (past the 5cm dead zone)
+    tool.onPointerUp!(at(140, 50), ctx)
 
-    // dividers select but don't drag: moving and releasing commits nothing
-    tool.onPointerMove!(at(100, 80), ctx)
-    tool.onPointerUp!(at(100, 80), ctx)
+    expect(apply).toHaveBeenCalledTimes(1)
+    const divider = doc.dividers[0]!
+    const a = doc.nodes[divider.a]!.pos
+    const b = doc.nodes[divider.b]!.pos
+    // both ends slid to x=140 and stayed on their horizontal host walls (y kept)
+    expect([a.x, b.x]).toEqual([140, 140])
+    expect([a.y, b.y].sort((m, n) => m - n)).toEqual([0, 100])
+  })
+
+  it('does not commit a divider drag that stays within the dead zone', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    addDivider(doc, a, b)
+    const { ctx, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 1), ctx)
+    tool.onPointerMove!(at(102, 1), ctx) // 2cm — under the 5cm threshold
+    tool.onPointerUp!(at(102, 1), ctx)
     expect(apply).not.toHaveBeenCalled()
   })
 
