@@ -5,6 +5,7 @@ import {
   AddOpeningCommand,
   AddRoomCommand,
   AddWallCommand,
+  RemoveDividerCommand,
   MergeNodesCommand,
   MoveItemCommand,
   MoveNodeCommand,
@@ -268,6 +269,43 @@ describe('AddDividerCommand', () => {
     expect(doc.walls.map((w) => w.id).sort()).toEqual(walls.map((w) => w.id).sort())
     expect(Object.keys(doc.nodes)).toHaveLength(4) // the two split nodes are gone
     expect(detectRooms(doc)).toHaveLength(1)
+  })
+})
+
+describe('RemoveDividerCommand', () => {
+  it('removes a divider on do, GCs its lone endpoint, and restores both on undo', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const anchor = addNode(doc, { x: 0, y: 100 })
+    addWall(doc, a, anchor) // keeps `a` alive after the divider goes
+    const b = addNode(doc, { x: 100, y: 0 })
+    const divider = addDivider(doc, a, b)
+
+    const cmd = new RemoveDividerCommand(divider.id)
+    cmd.do(doc)
+    expect(doc.dividers).toHaveLength(0)
+    expect(doc.nodes[b]).toBeUndefined() // held only by the divider → GC'd
+    expect(doc.nodes[a]).toBeDefined() // still on the wall
+
+    cmd.undo(doc)
+    expect(doc.dividers).toHaveLength(1)
+    expect(doc.nodes[b]).toBeDefined()
+  })
+
+  it('merges the two zones back when the dividing line is deleted', () => {
+    const doc = createEmptyDocument()
+    const tl = addNode(doc, { x: 0, y: 0 })
+    const tr = addNode(doc, { x: 200, y: 0 })
+    const br = addNode(doc, { x: 200, y: 100 })
+    const bl = addNode(doc, { x: 0, y: 100 })
+    for (const [p, q] of [[tl, tr], [tr, br], [br, bl], [bl, tl]] as const) addWall(doc, p, q)
+    new AddDividerCommand({ x: 100, y: 0 }, { x: 100, y: 100 }, { snapDist: 5 }).do(doc)
+    const dividerId = doc.dividers[0]!.id
+    expect(detectRooms(doc)).toHaveLength(2)
+
+    new RemoveDividerCommand(dividerId).do(doc)
+
+    expect(detectRooms(doc)).toHaveLength(1) // one room again
   })
 })
 

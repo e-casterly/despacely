@@ -234,6 +234,36 @@ export class RemoveWallCommand implements Command {
   }
 }
 
+/**
+ * Deletes a zoning divider, restoring it (and any endpoint GC'd with it) on
+ * undo. The walls its ends split stay split — two collinear halves read as one,
+ * and the zones simply merge back once the divider is gone.
+ */
+export class RemoveDividerCommand implements Command {
+  readonly label = 'Delete divider'
+  private divider?: Divider
+  private removedNodes: Node[] = []
+
+  constructor(private readonly dividerId: string) {}
+
+  do(doc: SceneDocument): void {
+    const divider = findDivider(doc, this.dividerId)
+    if (!divider) return
+    this.divider = divider
+    const before = { ...doc.nodes }
+    removeDivider(doc, this.dividerId)
+    this.removedNodes = Object.keys(before)
+      .filter((id) => !(id in doc.nodes))
+      .map((id) => before[id] as Node)
+  }
+
+  undo(doc: SceneDocument): void {
+    if (!this.divider) return
+    for (const node of this.removedNodes) doc.nodes[node.id] = node
+    doc.dividers.push(this.divider)
+  }
+}
+
 /** Edits a wall's scalar properties as one history entry; a partial patch. */
 export class SetWallPropsCommand implements Command {
   readonly label = 'Edit wall'

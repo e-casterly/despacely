@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SetOpeningPropsCommand, type Command } from '../../domain/commands'
-import { addNode, addWall, createEmptyDocument } from '../../domain/operations'
+import { addDivider, addNode, addWall, createEmptyDocument } from '../../domain/operations'
 import type { Opening, SceneDocument, Vec2 } from '../../domain/types'
 import type { Selection, ToolContext } from '../types'
 import { createSelectTool } from '../selectTool'
@@ -30,6 +30,23 @@ describe('selectTool', () => {
     createSelectTool().onPointerDown!(at(100, 3), ctx) // within thickness/2 + slop
 
     expect(select).toHaveBeenCalledWith({ kind: 'wall', id: wallId })
+  })
+
+  it('selects a divider clicked on its line and does not start a drag', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 200, y: 0 })
+    const divider = addDivider(doc, a, b)
+    const { ctx, select, apply } = ctxFor(doc)
+    const tool = createSelectTool()
+
+    tool.onPointerDown!(at(100, 3), ctx) // on the divider line, away from its ends
+    expect(select).toHaveBeenCalledWith({ kind: 'divider', id: divider.id })
+
+    // dividers select but don't drag: moving and releasing commits nothing
+    tool.onPointerMove!(at(100, 80), ctx)
+    tool.onPointerUp!(at(100, 80), ctx)
+    expect(apply).not.toHaveBeenCalled()
   })
 
   it('clears selection when clicking empty space', () => {

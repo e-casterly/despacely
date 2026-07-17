@@ -314,6 +314,31 @@ export function dividersAtNode(doc: SceneDocument, nodeId: NodeId): Divider[] {
   return doc.dividers.filter((divider) => divider.a === nodeId || divider.b === nodeId)
 }
 
+/**
+ * The zoning divider whose line the point lies nearest, within `maxDist` (cm),
+ * or undefined. Dividers are zero-thickness, so this measures straight to the
+ * centerline — the "did the user click/hover this divider" question.
+ */
+export function dividerUnderPoint(
+  doc: SceneDocument,
+  point: Vec2,
+  maxDist: number,
+): Divider | undefined {
+  let best: Divider | undefined
+  let bestDist = maxDist
+  for (const divider of doc.dividers) {
+    const a = doc.nodes[divider.a]?.pos
+    const b = doc.nodes[divider.b]?.pos
+    if (!a || !b) continue
+    const dist = distToSegment(point, a, b)
+    if (dist <= bestDist) {
+      best = divider
+      bestDist = dist
+    }
+  }
+  return best
+}
+
 /** Removes a divider and garbage-collects any endpoint no edge references anymore. */
 export function removeDivider(doc: SceneDocument, id: string): void {
   const divider = findDivider(doc, id)

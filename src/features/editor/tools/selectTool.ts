@@ -9,6 +9,7 @@ import { projectOnSegment } from '../domain/geometry'
 import { offsetRange, openingAtPoint, overlapsAnotherOpening, sideOfWall } from '../domain/openings'
 import {
   collapsesAnEdge,
+  dividerUnderPoint,
   findWall,
   nodeAt,
   nodesConnected,
@@ -194,6 +195,13 @@ export function createSelectTool(): Tool {
           delta: { x: 0, y: 0 },
           guides: [],
         }
+        return
+      }
+      // a zoning divider crossing the room interior: select it (no drag — its
+      // ends are shared T-nodes on the walls, so moving the body would kink them)
+      const divider = dividerUnderPoint(ctx.doc, input.world, ctx.snapDist)
+      if (divider) {
+        ctx.select({ kind: 'divider', id: divider.id })
         return
       }
       // nothing solid under the pointer: the room the click landed in, if any.

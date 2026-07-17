@@ -7,6 +7,7 @@ import {
   addWallBetween,
   collapsesAnEdge,
   createEmptyDocument,
+  dividerUnderPoint,
   dividersAtNode,
   docBounds,
   findDivider,
@@ -78,6 +79,16 @@ describe('dividers', () => {
     expect(doc.nodes[a]).toBeDefined()
     expect(doc.nodes[b]).toBeDefined()
     expect(nodeReferenced(doc, a)).toBe(true)
+  })
+
+  it('dividerUnderPoint finds the nearest divider within range, else undefined', () => {
+    const doc = createEmptyDocument()
+    const a = addNode(doc, { x: 0, y: 0 })
+    const b = addNode(doc, { x: 100, y: 0 })
+    const divider = addDivider(doc, a, b)
+
+    expect(dividerUnderPoint(doc, { x: 50, y: 3 }, 5)?.id).toBe(divider.id)
+    expect(dividerUnderPoint(doc, { x: 50, y: 30 }, 5)).toBeUndefined()
   })
 
   it('garbage-collects an endpoint no edge references once its divider is removed', () => {

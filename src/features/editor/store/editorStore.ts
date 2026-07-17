@@ -2,13 +2,20 @@ import { defineStore } from 'pinia'
 import { ref, shallowRef } from 'vue'
 import { useToastStore } from '@/stores/toasts'
 import {
+  RemoveDividerCommand,
   RemoveNodeCommand,
   RemoveOpeningCommand,
   RemoveRoomCommand,
   RemoveWallCommand,
   type Command,
 } from '../domain/commands'
-import { createEmptyDocument, findNode, findOpening, findWall } from '../domain/operations'
+import {
+  createEmptyDocument,
+  findDivider,
+  findNode,
+  findOpening,
+  findWall,
+} from '../domain/operations'
 import { findRoom, roomExclusiveWalls } from '../domain/rooms'
 import type { NodeId, SceneDocument, Vec2 } from '../domain/types'
 import type { Selection } from '../tools/types'
@@ -112,6 +119,8 @@ export const useEditorStore = defineStore('editor', () => {
       if (findNode(doc.value, target.id)) apply(new RemoveNodeCommand(target.id))
     } else if (target.kind === 'opening') {
       if (findOpening(doc.value, target.id)) apply(new RemoveOpeningCommand(target.id))
+    } else if (target.kind === 'divider') {
+      if (findDivider(doc.value, target.id)) apply(new RemoveDividerCommand(target.id))
     } else if (target.kind === 'room' && findRoom(doc.value, target.id)) {
       // named explicitly rather than left as a trailing else: this branch used to
       // catch anything that wasn't a wall or a vertex, so a new kind of selection

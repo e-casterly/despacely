@@ -21,6 +21,7 @@ export type Selection =
   | { kind: 'node'; id: NodeId }
   | { kind: 'room'; id: string }
   | { kind: 'opening'; id: string }
+  | { kind: 'divider'; id: string }
 
 /** Everything a tool needs to read the scene and commit edits. */
 export interface ToolContext {
